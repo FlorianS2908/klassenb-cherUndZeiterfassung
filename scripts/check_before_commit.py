@@ -17,6 +17,12 @@ REQUIRED_IGNORES = {
     ".venv/",
     "dist/",
     "__pycache__/",
+    "api_key_klassenbuch.txt",
+    "api_key*.txt",
+    "*.key",
+    "*.secret",
+    "secrets/",
+    "credentials/",
 }
 BLOCKED_PREFIXES = (
     "uploads/",
@@ -27,6 +33,14 @@ BLOCKED_PREFIXES = (
     "node_modules/",
     ".venv/",
     "dist/",
+    "secrets/",
+    "credentials/",
+)
+BLOCKED_FILE_PATTERNS = (
+    re.compile(r"(^|/)api_key_klassenbuch\.txt$", re.IGNORECASE),
+    re.compile(r"(^|/)api_key.*\.txt$", re.IGNORECASE),
+    re.compile(r"\.key$", re.IGNORECASE),
+    re.compile(r"\.secret$", re.IGNORECASE),
 )
 SECRET_PATTERNS = [
     re.compile(r"(?m)^[ \t]*KLASSENBUCH_PASSWORD[ \t]*=[ \t]*.+"),
@@ -34,10 +48,11 @@ SECRET_PATTERNS = [
     re.compile(r"(?m)^[ \t]*OPENAI_API_KEY[ \t]*=[ \t]*sk-"),
     re.compile(r"github_pat_[A-Za-z0-9_]+"),
     re.compile(r"ghp_[A-Za-z0-9_]+"),
-    re.compile(r"\bPasswort\b\s*[:=]\s*\S+", re.IGNORECASE),
-    re.compile(r"\bpassword\b\s*[:=]\s*\S+", re.IGNORECASE),
-    re.compile(r"\bapi_key\b\s*[:=]\s*\S+", re.IGNORECASE),
-    re.compile(r"\btoken\b\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"\bPasswort\b\s*[:=]\s*['\"][^'\"]+['\"]", re.IGNORECASE),
+    re.compile(r"\bpassword\b\s*[:=]\s*['\"][^'\"]+['\"]", re.IGNORECASE),
+    re.compile(r"\bapi_key\b\s*[:=]\s*['\"][^'\"]+['\"]", re.IGNORECASE),
+    re.compile(r"\btoken\b\s*[:=]\s*['\"][^'\"]+['\"]", re.IGNORECASE),
 ]
 ALLOW_SECRET_WORD_FILES = {
     "README.md",
@@ -89,13 +104,13 @@ def main() -> int:
         return fail(".gitignore enthaelt nicht alle Pflichtmuster: " + ", ".join(missing))
 
     all_index_files = set(staged_files()) | set(tracked_files())
-    blocked = [path for path in all_index_files if path == ".env" or path.startswith(BLOCKED_PREFIXES)]
+    blocked = [path for path in all_index_files if path == ".env" or path.startswith(BLOCKED_PREFIXES) or any(pattern.search(path) for pattern in BLOCKED_FILE_PATTERNS)]
     if blocked:
-        return fail("Sensible oder generierte Dateien sind im Git-Index: " + ", ".join(sorted(blocked)))
+        return fail("Sicherheitspruefung fehlgeschlagen: API-Key oder Secret-Datei im Commit gefunden. " + ", ".join(sorted(blocked)))
 
     candidates = sorted(set(staged_files()) or set(tracked_files()))
     for path in candidates:
-        if path == ".env" or path.startswith(BLOCKED_PREFIXES) or Path(path).name.endswith((".png", ".jpg", ".jpeg", ".zip")):
+        if path == ".env" or path.startswith(BLOCKED_PREFIXES) or any(pattern.search(path) for pattern in BLOCKED_FILE_PATTERNS) or Path(path).name.endswith((".png", ".jpg", ".jpeg", ".zip")):
             return fail(f"Sensible/generierte Datei darf nicht committed werden: {path}")
         if path in ALLOW_SECRET_WORD_FILES:
             continue

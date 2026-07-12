@@ -9,7 +9,15 @@ error_reports/
 uploads/
 analysis_history/
 analysis_history_test/
+openai_key_test.secret
+openai_empty_key_test.secret
 *.pyc
+api_key_klassenbuch.txt
+api_key*.txt
+*.key
+*.secret
+secrets/
+credentials/
 .pytest_cache/
 .pytest_tmp/
 pytest-cache-files-*/

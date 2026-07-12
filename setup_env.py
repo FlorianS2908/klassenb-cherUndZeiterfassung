@@ -18,9 +18,37 @@ def ask_secret(prompt: str) -> str:
     return getpass.getpass(f"{prompt}: ").strip()
 
 
+def configure_openai() -> tuple[str, str]:
+    default_path = r"C:\Users\Florian.Schaffer\OneDrive - Amadeus Fire AG\Desktop\KlassenbuchTimebutler\api_key_klassenbuch.txt"
+    print("OpenAI API-Key fuer KI-Auswertung:")
+    print("1. Vorhandene Key-Datei verwenden")
+    print("2. API-Key jetzt verdeckt eingeben")
+    print("3. Spaeter einrichten / KI deaktivieren")
+    choice = ask("Auswahl", "3")
+    if choice == "1":
+        key_file = ask("Pfad zur OpenAI-Key-Datei", default_path)
+        path = Path(key_file)
+        if not path.exists():
+            print("Hinweis: OpenAI API-Key-Datei wurde nicht gefunden. KI-Analyse ist deaktiviert.")
+        elif not path.read_text(encoding="utf-8", errors="ignore").strip():
+            print("Hinweis: OpenAI API-Key-Datei ist leer.")
+        return key_file, ""
+    if choice == "2":
+        key = ask_secret("OpenAI API-Key")
+        save_file = ask("Key in Datei speichern? (J/n)", "J").lower()
+        if save_file in {"j", "ja", "y", "yes"}:
+            path = Path(default_path)
+            path.write_text(key, encoding="utf-8")
+            print("API-Key gespeichert. Achte darauf, diese Datei niemals zu committen.")
+            return str(path), ""
+        print("API-Key gespeichert. Achte darauf, diese Datei niemals zu committen.")
+        return "", key
+    return "", ""
+
+
 def ensure_gitignore() -> None:
     existing = GITIGNORE_PATH.read_text(encoding="utf-8") if GITIGNORE_PATH.exists() else ""
-    required = [".env", "__pycache__/", ".venv/", "node_modules/", "dist/", "logs/", "screenshots/", "error_reports/", "uploads/", "analysis_history/", "*.pyc"]
+    required = [".env", "__pycache__/", ".venv/", "node_modules/", "dist/", "logs/", "screenshots/", "error_reports/", "uploads/", "analysis_history/", "*.pyc", "api_key_klassenbuch.txt", "api_key*.txt", "*.key", "*.secret", "secrets/", "credentials/"]
     additions = [item for item in required if item not in existing.splitlines()]
     if additions:
         GITIGNORE_PATH.write_text((existing.rstrip() + "\n" + "\n".join(additions) + "\n").lstrip(), encoding="utf-8")
@@ -43,7 +71,7 @@ def main() -> int:
     if separate in {"j", "ja", "y", "yes"}:
         tb_username = ask("Timebutler-Benutzername")
         tb_password = ask_secret("Timebutler-Passwort")
-    openai_key = ask_secret("OpenAI API-Key optional (leer lassen moeglich)")
+    openai_key_file, openai_key = configure_openai()
     federal_state = ask("Bundesland", "BW")
     blocked_dates = ask("BLOCKED_DATES kommagetrennt YYYY-MM-DD", "")
     vacation_dates = ask("VACATION_DATES kommagetrennt YYYY-MM-DD", "")
@@ -58,7 +86,13 @@ KLASSENBUCH_PASSWORD={password}
 TIMEBUTLER_USERNAME={tb_username}
 TIMEBUTLER_PASSWORD={tb_password}
 
+OPENAI_API_KEY_FILE={openai_key_file}
 OPENAI_API_KEY={openai_key}
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_MAX_INPUT_CHARS=30000
+OPENAI_TIMEOUT_SECONDS=60
+OPENAI_RETRY_COUNT=2
+OPENAI_TEMPERATURE=0.2
 
 AUTO_SUBMIT=false
 DEFAULT_SIGNATURE=Schaffer

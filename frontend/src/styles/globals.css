@@ -21,6 +21,8 @@ h1 { margin: 0; font-size: 32px; }
 h2 { margin-top: 0; font-size: 20px; }
 p { color: #5f6f7f; }
 .cards { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.small-cards > div { background: #f7f9fc; border: 1px solid #e1e7ef; border-radius: 8px; padding: 12px; }
+.small-cards span { display: block; color: #667789; font-size: 12px; margin-bottom: 6px; }
 .status-card, .panel, .ue-card { background: white; border: 1px solid #e1e7ef; border-radius: 8px; padding: 18px; box-shadow: 0 8px 24px rgba(16, 24, 32, 0.05); }
 .status-card span { display: block; color: #667789; font-size: 13px; margin-bottom: 8px; }
 .status-card strong { overflow-wrap: anywhere; }

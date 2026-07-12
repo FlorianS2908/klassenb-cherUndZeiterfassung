@@ -13,3 +13,9 @@ def test_commit_and_push_exists():
 
 def test_gitignore_contains_analysis_history():
     assert "analysis_history/" in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+
+def test_gitignore_contains_api_key_patterns():
+    lines = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "api_key*.txt" in lines
+    assert "*.secret" in lines

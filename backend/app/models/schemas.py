@@ -82,6 +82,10 @@ class AnalysisResult(BaseModel):
     ue_items: list[UeItem]
     range: RangeResult
     text_length: int
+    ai_used: bool = False
+    ai_model: str = ""
+    ai_warnings: list[str] = Field(default_factory=list)
+    ai_truncated: bool = False
 
 
 class TimebutlerPayload(BaseModel):

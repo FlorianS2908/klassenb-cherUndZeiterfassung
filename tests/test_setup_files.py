@@ -7,6 +7,7 @@ def test_env_example_has_no_real_credentials():
     content = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert "your_password" in content
     assert "KLASSENBUCH_PASSWORD=<" not in content
+    assert "OPENAI_API_KEY=sk-" not in content
 
 
 def test_gitignore_contains_env():

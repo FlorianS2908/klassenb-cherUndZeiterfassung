@@ -1,4 +1,4 @@
-import { apiPost } from './api';
+import { apiGet, apiPost } from './api';
 import type { AnalysisResult } from '../types';
 
 export async function uploadFile(file: File) {
@@ -21,4 +21,8 @@ export async function analyzeFile(fileId: string, filename: string, selection: s
   form.append('filename', filename);
   form.append('selection', selection);
   return apiPost<AnalysisResult>('/api/files/analyze', form);
+}
+
+export async function getOpenAiStatus() {
+  return apiGet<{ active: boolean; key_present: boolean; source: string; message: string; display_path: string; model: string; max_input_chars: number }>('/api/files/openai-status');
 }

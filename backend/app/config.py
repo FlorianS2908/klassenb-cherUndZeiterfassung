@@ -20,7 +20,13 @@ class Settings(BaseModel):
     klassenbuch_password: str = ""
     timebutler_username: str = ""
     timebutler_password: str = ""
+    openai_api_key_file: str = r"C:\Users\Florian.Schaffer\OneDrive - Amadeus Fire AG\Desktop\KlassenbuchTimebutler\api_key_klassenbuch.txt"
     openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    openai_max_input_chars: int = 30000
+    openai_timeout_seconds: int = 60
+    openai_retry_count: int = 2
+    openai_temperature: float = 0.2
     auto_submit: bool = False
     default_signature: str = "Schaffer"
     upload_folder: str = "./uploads"
@@ -85,6 +91,13 @@ class Settings(BaseModel):
                 "remote_url": self.github_remote_url,
                 "default_branch": self.git_default_branch,
             },
+            "openai": {
+                "model": self.openai_model or "gpt-4o-mini",
+                "max_input_chars": self.openai_max_input_chars,
+                "timeout_seconds": self.openai_timeout_seconds,
+                "retry_count": self.openai_retry_count,
+                "temperature": self.openai_temperature,
+            },
         }
 
 
@@ -100,6 +113,18 @@ def get_settings() -> Settings:
             return default
         return raw.lower() in {"1", "true", "yes", "ja", "y", "j"}
 
+    def env_int(name: str, default: int) -> int:
+        try:
+            return int(env(name, str(default)))
+        except ValueError:
+            return default
+
+    def env_float(name: str, default: float) -> float:
+        try:
+            return float(env(name, str(default)))
+        except ValueError:
+            return default
+
     return Settings(
         klassenbuch_url=env("KLASSENBUCH_URL", "https://klassenbuch.gfn.de/login"),
         timebutler_url=env("TIMEBUTLER_URL", "https://app.timebutler.com/do?ha=login&ac=2"),
@@ -107,7 +132,13 @@ def get_settings() -> Settings:
         klassenbuch_password=env("KLASSENBUCH_PASSWORD"),
         timebutler_username=env("TIMEBUTLER_USERNAME"),
         timebutler_password=env("TIMEBUTLER_PASSWORD"),
+        openai_api_key_file=env("OPENAI_API_KEY_FILE", r"C:\Users\Florian.Schaffer\OneDrive - Amadeus Fire AG\Desktop\KlassenbuchTimebutler\api_key_klassenbuch.txt"),
         openai_api_key=env("OPENAI_API_KEY"),
+        openai_model=env("OPENAI_MODEL", "gpt-4o-mini") or "gpt-4o-mini",
+        openai_max_input_chars=env_int("OPENAI_MAX_INPUT_CHARS", 30000),
+        openai_timeout_seconds=env_int("OPENAI_TIMEOUT_SECONDS", 60),
+        openai_retry_count=env_int("OPENAI_RETRY_COUNT", 2),
+        openai_temperature=env_float("OPENAI_TEMPERATURE", 0.2),
         auto_submit=env_bool("AUTO_SUBMIT", False),
         default_signature=env("DEFAULT_SIGNATURE", "Schaffer"),
         upload_folder=env("UPLOAD_FOLDER", "./uploads"),

@@ -6,7 +6,7 @@ import { getStatus } from '../services/statusService';
 export function ReviewPage() {
   const [confirmed, setConfirmed] = useState(false);
   const [autoSubmit, setAutoSubmit] = useState(false);
-  const data = { hinweis: 'Review sammelt die finalen Klassenbuch- und Timebutler-Daten aus dem aktuellen Lauf.', dryRunDefault: true };
+  const data = { hinweis: 'Review sammelt die finalen Klassenbuch- und Timebutler-Daten aus dem aktuellen Lauf.', dryRunDefault: true, kiMetadaten: { verwendet: 'siehe aktueller Analyse-Lauf', confidence_score: 'siehe Klassenbuch-Seite', warnungen: 'siehe Klassenbuch-Seite' } };
   useEffect(() => {
     getStatus().then((status) => setAutoSubmit(status.auto_submit));
   }, []);

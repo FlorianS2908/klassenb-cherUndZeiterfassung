@@ -43,6 +43,10 @@ export interface AnalysisResult {
   ue_items: UeItem[];
   range: { selection: string; selected: number[]; total_items: number; is_full_range: boolean; count: number };
   text_length: number;
+  ai_used: boolean;
+  ai_model: string;
+  ai_warnings: string[];
+  ai_truncated: boolean;
 }
 
 export interface TimebutlerPayload {

@@ -153,6 +153,25 @@ Fehlerberichte enthalten Status, Logs und Screenshots, aber keine Passwoerter, A
 
 Die gleiche Datei kann mehrfach mit verschiedenen Bereichen analysiert werden, zum Beispiel heute Folien `5-10` und morgen Folien `11-18`. Jeder Lauf wird als eigener Eintrag in der Analysehistorie gespeichert und kann dort wieder geoeffnet werden.
 
+## OpenAI KI-Analyse
+
+Die KI-Analyse sendet nicht die komplette Datei an OpenAI. Das Backend extrahiert lokal nur den ausgewaehlten Bereich, kuerzt ihn bei Bedarf auf `OPENAI_MAX_INPUT_CHARS` und sendet nur diesen Textbereich mit Dateiname, Dateityp und Bereichsmetadaten an die Responses API.
+
+Empfohlene Konfiguration:
+
+```text
+OPENAI_API_KEY_FILE=C:\Users\Florian.Schaffer\OneDrive - Amadeus Fire AG\Desktop\KlassenbuchTimebutler\api_key_klassenbuch.txt
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_MAX_INPUT_CHARS=30000
+OPENAI_TIMEOUT_SECONDS=60
+OPENAI_RETRY_COUNT=2
+OPENAI_TEMPERATURE=0.2
+```
+
+Alternativ kann `OPENAI_API_KEY` direkt in der lokalen `.env` gesetzt werden. Die Key-Datei und `api_key*.txt`, `*.key`, `*.secret`, `secrets/` und `credentials/` sind in `.gitignore` gesperrt. Der API-Key wird nie im Frontend angezeigt, nicht geloggt und nicht in Fehlerberichte geschrieben.
+
+Wenn kein Key vorhanden ist, bleibt das Tool nutzbar: Die Klassenbuch-Seite zeigt den OpenAI-Status und der manuelle Korrekturmodus bleibt verfuegbar.
+
 ## GitHub Push
 
 Das Projekt enthaelt eine Sicherheitspruefung vor Commits:

@@ -9,7 +9,7 @@ from app.config import get_settings, resolve_project_path
 from app.models.schemas import AnalysisResult, ApiMessage, FilePreview, UploadedFileInfo
 from app.services.file_parser import SUPPORTED_EXTENSIONS, count_items, detect_file_type, extract_text
 from app.services.range_service import parse_range_selection
-from app.services.ue_planner import plan_nine_ue
+from app.services.openai_client import analyze_with_openai, public_status
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -49,10 +49,28 @@ def preview_range(file_id: str = Form(...), filename: str = Form(...), selection
     return FilePreview(file_id=file_id, range=parsed, text_preview=text[:4000], text_length=len(text))
 
 
+@router.get("/openai-status")
+def openai_status():
+    return public_status()
+
+
 @router.post("/analyze")
-def analyze(file_id: str = Form(...), filename: str = Form(...), selection: str = Form("")):
+async def analyze(file_id: str = Form(...), filename: str = Form(...), selection: str = Form("")):
     path = upload_path(file_id, filename)
-    parsed = parse_range_selection(selection, count_items(path))
+    total = count_items(path)
+    parsed = parse_range_selection(selection, total)
     text = extract_text(path, parsed.selected)
-    topics, confidence, items = plan_nine_ue(text)
-    return AnalysisResult(file_id=file_id, topics=topics, confidence_score=confidence, ue_items=items, range=parsed, text_length=len(text))
+    file_type, unit = detect_file_type(path)
+    ai_result = await analyze_with_openai(filename, file_type, f"{total} {unit}", parsed.selection, parsed.count, text)
+    return AnalysisResult(
+        file_id=file_id,
+        topics=ai_result.topics,
+        confidence_score=ai_result.confidence_score,
+        ue_items=ai_result.ue_items,
+        range=parsed,
+        text_length=len(text),
+        ai_used=ai_result.used_ai,
+        ai_model=get_settings().openai_model,
+        ai_warnings=ai_result.warnings,
+        ai_truncated=ai_result.truncated,
+    )
