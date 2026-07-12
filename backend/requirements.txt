@@ -1,0 +1,15 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+playwright>=1.45.0
+pydantic>=2.7.0
+python-dotenv>=1.0.1
+python-multipart>=0.0.9
+APScheduler>=3.10.4
+holidays>=0.52
+PyPDF2>=3.0.1
+python-pptx>=0.6.23
+beautifulsoup4>=4.12.3
+markdown>=3.6
+openai>=1.35.0
+pytest>=8.2.0
+plyer>=2.1.0

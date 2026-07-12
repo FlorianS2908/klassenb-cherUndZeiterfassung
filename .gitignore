@@ -1,0 +1,16 @@
+.env
+__pycache__/
+.venv/
+node_modules/
+dist/
+logs/
+screenshots/
+error_reports/
+uploads/
+analysis_history/
+analysis_history_test/
+*.pyc
+.pytest_cache/
+.pytest_tmp/
+pytest-cache-files-*/
+.mypy_cache/
