@@ -7,8 +7,8 @@ def test_git_security_script_exists():
     assert (ROOT / "scripts" / "check_before_commit.py").exists()
 
 
-def test_commit_and_push_exists():
-    assert (ROOT / "commit_and_push.bat").exists()
+def test_commit_and_push_batch_removed():
+    assert not (ROOT / "commit_and_push.bat").exists()
 
 
 def test_gitignore_contains_analysis_history():

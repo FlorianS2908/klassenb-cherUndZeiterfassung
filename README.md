@@ -4,21 +4,31 @@ Lokales Windows-Tool fuer Klassenbuch-Automation und Zeiterfassung. Das Backend 
 
 Der Standardmodus ist immer Dry-Run. Finale Aktionen wie Speichern, Signieren oder Absenden sind nur moeglich, wenn `AUTO_SUBMIT=true` gesetzt ist und die finale Review-Seite bestaetigt wurde.
 
-## Installation Unter Windows
+## Start Unter Windows
 
-1. Python 3.11 oder neuer installieren.
-2. Node.js inklusive npm installieren.
-3. Im Projektordner ausfuehren:
+Es gibt nur noch eine nutzerrelevante Startdatei:
 
 ```bat
-install.bat
+KlassenbuchTool_starten.bat
 ```
 
-Das Skript erstellt `.venv`, installiert Backend-Abhaengigkeiten, installiert Playwright-Browser und installiert Frontend-Abhaengigkeiten. Zugangsdaten werden nicht in der Konsole abgefragt.
+Neuer Ablauf:
+
+1. Repository herunterladen oder klonen.
+2. `KlassenbuchTool_starten.bat` doppelklicken.
+3. Das Tool prueft Python, `.venv`, Backend-Abhaengigkeiten, Playwright, Node.js/npm und Frontend-Abhaengigkeiten automatisch.
+4. Wenn Node.js/npm fehlt, wird portable Node.js lokal unter `.tools/` vorbereitet. Keine Admin-Rechte noetig.
+5. Backend und Frontend starten automatisch.
+6. Der Browser oeffnet automatisch.
+7. Wenn noch keine `.env` vorhanden ist, oeffnet sich [http://localhost:5173/setup](http://localhost:5173/setup).
+8. Zugangsdaten werden in der UI eingetragen.
+9. Danach Dashboard nutzen.
+
+Bei Fehlern bleibt das Fenster offen. Zugangsdaten, Passwoerter, API-Keys und `.env`-Inhalte werden nicht in der CMD abgefragt oder angezeigt.
 
 ## Setup
 
-Das Setup laeuft in der Weboberflaeche. Beim ersten Start ohne `.env` oeffnet `start_tool.bat` automatisch [http://localhost:5173/setup](http://localhost:5173/setup). Alternativ kann `setup_env.bat` genutzt werden; die Datei startet ebenfalls das Web-Setup.
+Das Setup laeuft in der Weboberflaeche. Beim ersten Start ohne `.env` oeffnet `KlassenbuchTool_starten.bat` automatisch [http://localhost:5173/setup](http://localhost:5173/setup).
 
 Die Weboberflaeche erzeugt lokal eine `.env`. Passwoerter und API-Keys werden nicht im Frontend angezeigt, nicht geloggt und nicht von der Setup-API zurueckgegeben.
 
@@ -26,26 +36,8 @@ Wenn `TIMEBUTLER_USERNAME` oder `TIMEBUTLER_PASSWORD` leer sind, nutzt das Backe
 
 `setup_env.py` startet keine Konsolenabfragen mehr. Das Skript gibt nur noch den Hinweis auf das Web-Setup unter [http://localhost:5173/setup](http://localhost:5173/setup) aus.
 
-## Start
-
-```bat
-start_tool.bat
-```
-
 Backend: [http://localhost:8000](http://localhost:8000)  
 Frontend: [http://localhost:5173](http://localhost:5173)
-
-Dry-Run bewusst starten:
-
-```bat
-dry_run.bat
-```
-
-Abhaengigkeiten aktualisieren:
-
-```bat
-update_dependencies.bat
-```
 
 ## Entwicklungsstart
 
@@ -119,7 +111,7 @@ Die Automation nutzt Playwright-Selektoren mit Fallbacks, keine Koordinatenklick
 2. Neue Aufgabe erstellen.
 3. Trigger: woechentlich, Montag bis Freitag, 08:20 Uhr.
 4. Aktion: Programm starten.
-5. Programm: Pfad zu `start_tool.bat` oder `dry_run.bat`.
+5. Programm: Pfad zu `KlassenbuchTool_starten.bat`.
 6. Starten in: Projektordner `klassenbuch-tool`.
 
 Alternative: APScheduler ist im Backend vorbereitet und registriert einen Werktagsjob fuer 08:20 Uhr Europe/Berlin.
@@ -144,10 +136,10 @@ Fehlerberichte enthalten Status, Logs und Screenshots, aber keine Passwoerter, A
 
 ## Fehlerbehebung
 
-- `.venv` fehlt: `install.bat` ausfuehren.
-- `.env` fehlt: `start_tool.bat` ausfuehren und das Setup im Browser abschliessen.
-- Frontend startet nicht: Node.js/npm pruefen und `update_dependencies.bat` ausfuehren.
-- Backend startet nicht: Python 3.11+ pruefen und Backend-Abhaengigkeiten installieren.
+- `.venv` fehlt: `KlassenbuchTool_starten.bat` erneut starten; die Datei erstellt `.venv` automatisch.
+- `.env` fehlt: `KlassenbuchTool_starten.bat` ausfuehren und das Setup im Browser abschliessen.
+- Frontend startet nicht: `KlassenbuchTool_starten.bat` erneut starten; fehlende Frontend-Abhaengigkeiten werden automatisch installiert.
+- Backend startet nicht: Python 3.11+ pruefen und `KlassenbuchTool_starten.bat` erneut starten.
 - Ungueltiger Bereich: Syntax wie `1-5, 8, 10-12` verwenden.
 - Produktivbutton deaktiviert: `AUTO_SUBMIT`, Review, Sperrtage und Validierungen pruefen.
 
@@ -174,7 +166,7 @@ Alternativ kann `OPENAI_API_KEY` direkt in der lokalen `.env` gesetzt werden. Di
 
 Wenn kein Key vorhanden ist, bleibt das Tool nutzbar: Die Klassenbuch-Seite zeigt den OpenAI-Status und der manuelle Korrekturmodus bleibt verfuegbar.
 
-## GitHub Push
+## Git Und Sicherheitspruefung
 
 Das Projekt enthaelt eine Sicherheitspruefung vor Commits:
 
@@ -182,10 +174,4 @@ Das Projekt enthaelt eine Sicherheitspruefung vor Commits:
 python scripts\check_before_commit.py
 ```
 
-Commit und Push:
-
-```bat
-commit_and_push.bat "Initial build: Klassenbuch und Timebutler Automatisierung"
-```
-
-Das Skript initialisiert Git bei Bedarf, setzt `origin` auf `https://github.com/FlorianS2908/klassenb-cherUndZeiterfassung.git`, prueft `.gitignore`, verhindert sensible Dateien im Git-Index und versucht den Push nach `main`. Wenn `main` geschuetzt ist, wird ein Feature-Branch vorbereitet. GitHub-Zugangsdaten oder Tokens werden nicht abgefragt und nicht gespeichert.
+Git-Aktionen laufen manuell, ueber Codex oder GitHub Desktop. Die Sicherheitspruefung verhindert sensible Dateien im Git-Index.
