@@ -1,5 +1,5 @@
 from app.browser.selectors_klassenbuch import KLASSENBUCH_SELECTORS
-from app.browser.automation_klassenbuch import _interpolate_points, _signature_points, _validate_signature_submit_allowed
+from app.browser.automation_klassenbuch import _extract_edit_action_index, _interpolate_points, _normalize_table_key, _row_to_entry, _signature_points, _validate_signature_submit_allowed
 from app.browser.selectors_timebutler import TIMEBUTLER_SELECTORS
 from app.config import get_settings
 from app.services.klassenbuch_service import ensure_open_status
@@ -16,12 +16,15 @@ def test_important_klassenbuch_selectors_have_fallbacks():
         "teaching_format_fields",
         "teaching_format_modal",
         "teaching_format_apply",
+        "wizard_markers",
         "signature_canvas",
         "signature",
         "sign_button",
         "signature_page_markers",
     ]:
         assert len(KLASSENBUCH_SELECTORS[key]) >= 3
+    for key in ["offene", "ueberfaellige", "freigegebene", "korrektur"]:
+        assert len(KLASSENBUCH_SELECTORS["overview_tabs"][key]) >= 3
 
 
 def test_important_timebutler_selectors_have_fallbacks():
@@ -58,3 +61,20 @@ def test_schaffer_signature_interpolation_adds_smooth_mouse_points():
     assert interpolated[0] == points[0]
     assert interpolated[-1] == points[-1]
     assert len(interpolated) > len(points)
+
+
+def test_klassenbuch_table_headers_are_normalized():
+    assert _normalize_table_key("Einsatzzeit Von") == "einsatzzeit_von"
+    assert _normalize_table_key("Einsatzzeit Bis") == "einsatzzeit_bis"
+    assert _normalize_table_key("Nummer") == "nummer"
+    assert _normalize_table_key("Bearbeiten") == "bearbeiten"
+
+
+def test_klassenbuch_number_can_be_alphanumeric_in_fallback_parser():
+    entry = _row_to_entry("EACGBAC\nLF-ZQ8a HTML & CSS\nOffen", 0)
+    assert entry["number"] == "EACGBAC"
+
+
+def test_edit_action_index_is_extracted_from_overview_onclick():
+    onclick = "classbookApp.overview.forwardToWizardWithPreselection(12);"
+    assert _extract_edit_action_index(onclick) == "12"

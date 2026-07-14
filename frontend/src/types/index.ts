@@ -59,6 +59,50 @@ export interface TimebutlerPayload {
   remark: string;
 }
 
+export interface KlassenbuchEntry {
+  id: string;
+  tab?: string;
+  raum?: string;
+  nummer?: string;
+  titel?: string;
+  beginn?: string;
+  ende?: string;
+  einsatzzeit_von?: string;
+  einsatzzeit_bis?: string;
+  status?: string;
+  datum?: string;
+  editable?: boolean;
+  edit_href?: string;
+  row_index?: string;
+  raw?: string;
+  title?: string;
+  date?: string;
+  number?: string;
+}
+
+export interface KlassenbuchDiagnostics {
+  step?: string;
+  current_url?: string;
+  page_title?: string;
+  tabs_found?: string[];
+  tab_names_found?: string[];
+  tab_errors?: Array<Record<string, string>>;
+  table_count?: number;
+  row_count?: number;
+  screenshots?: string[];
+  screenshot_path?: string;
+  html_snapshot_path?: string;
+  exception_type?: string;
+}
+
+export interface KlassenbuchOpenResponse {
+  ok?: boolean;
+  items: KlassenbuchEntry[];
+  groups?: Record<string, KlassenbuchEntry[]>;
+  diagnostics?: KlassenbuchDiagnostics;
+  count: number;
+}
+
 export interface SetupDefaults {
   klassenbuch_url: string;
   timebutler_url: string;

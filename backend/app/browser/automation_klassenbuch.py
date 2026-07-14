@@ -4,14 +4,29 @@ import logging
 import math
 import re
 from collections.abc import Sequence
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from app.browser.base import browser_page, click_first, fill_first, first_visible, optional_click, table_rows
 from app.browser.selectors_klassenbuch import KLASSENBUCH_SELECTORS
-from app.config import get_settings
+from app.config import get_settings, resolve_project_path
 from app.models.schemas import StepState
 from app.models.schemas import ApiMessage
-from app.services.screenshot_service import save_page_screenshot
+from app.services.screenshot_service import save_page_screenshot, screenshot_name
 from app.services.status_service import status_service
+
+
+OVERVIEW_TABS = [
+    ("offene", "offene Themendokumentationen"),
+    ("ueberfaellige", "\u00dcberf\u00e4llige Themendokumentationen"),
+    ("freigegebene", "Freigegebene Themendokumentationen"),
+    ("korrektur", "Korrektur notwendig"),
+]
+
+
+class KlassenbuchLoadError(RuntimeError):
+    def __init__(self, message: str, diagnostics: dict | None = None):
+        super().__init__(message)
+        self.diagnostics = diagnostics or {}
 
 
 def _run_id() -> str:
@@ -23,6 +38,44 @@ async def _safe_screenshot(page, step: str) -> str:
         return str(await save_page_screenshot(page, _run_id(), step))
     except Exception:
         return ""
+
+
+async def save_html_snapshot(page, name: str) -> str:
+    try:
+        folder = resolve_project_path(get_settings().screenshot_folder)
+        folder.mkdir(parents=True, exist_ok=True)
+        safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name)
+        path = folder / f"{_run_id()}_{safe_name}.html"
+        path.write_text(await page.content(), encoding="utf-8")
+        return str(path)
+    except Exception:
+        return ""
+
+
+async def _safe_html_snapshot(page, step: str) -> str:
+    return await save_html_snapshot(page, step)
+
+
+def _exception_message(exc: Exception, fallback: str) -> str:
+    text = str(exc).strip()
+    if text:
+        return text
+    return f"{fallback} ({type(exc).__name__})"
+
+
+async def _failure_diagnostics(page, step: str, exc: Exception | None = None) -> dict:
+    screenshot_path = await _safe_screenshot(page, f"klassenbuch_{step}_error")
+    html_snapshot_path = await _safe_html_snapshot(page, f"klassenbuch_{step}_error")
+    diagnostics = await _overview_diagnostics(page, screenshot_path, html_snapshot_path)
+    diagnostics["step"] = step
+    if exc is not None:
+        diagnostics["exception_type"] = type(exc).__name__
+    return diagnostics
+
+
+async def _raise_load_error(page, step: str, message: str, exc: Exception | None = None) -> None:
+    detail = message if exc is None else f"{message}: {_exception_message(exc, 'unbekannter Fehler')}"
+    raise KlassenbuchLoadError(detail, await _failure_diagnostics(page, step, exc))
 
 
 def _set_signature_step(state: StepState, message: str) -> None:
@@ -68,25 +121,322 @@ async def _first_visible_in(scope, selectors: list[str]):
 
 async def _login(page) -> None:
     settings = get_settings()
-    await page.goto(settings.klassenbuch_url, wait_until="domcontentloaded")
-    await _safe_screenshot(page, "klassenbuch_login_loaded")
-    await fill_first(page, KLASSENBUCH_SELECTORS["username"], settings.klassenbuch_username, "Benutzername")
-    await fill_first(page, KLASSENBUCH_SELECTORS["password"], settings.klassenbuch_password, "Passwort")
-    await click_first(page, KLASSENBUCH_SELECTORS["login_button"], "Anmelden")
-    await page.wait_for_load_state("networkidle")
-    await first_visible(page, KLASSENBUCH_SELECTORS["overview_markers"])
-    await _safe_screenshot(page, "klassenbuch_login_success")
+    try:
+        await page.goto(settings.klassenbuch_url, wait_until="domcontentloaded")
+        await _safe_screenshot(page, "klassenbuch_login_loaded")
+        if "/login" not in page.url.lower():
+            await _safe_screenshot(page, "klassenbuch_login_success")
+            return
+        await fill_first(page, KLASSENBUCH_SELECTORS["username"], settings.klassenbuch_username, "Benutzername")
+        await fill_first(page, KLASSENBUCH_SELECTORS["password"], settings.klassenbuch_password, "Passwort")
+        await click_first(page, KLASSENBUCH_SELECTORS["login_button"], "Anmelden")
+        try:
+            await page.wait_for_function("() => !location.href.toLowerCase().includes('/login')", timeout=10000)
+        except Exception:
+            if "/login" in page.url.lower():
+                await _raise_load_error(page, "login_failed", "Login ins Klassenbuch fehlgeschlagen")
+        try:
+            await page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+        await _safe_screenshot(page, "klassenbuch_login_success")
+    except KlassenbuchLoadError:
+        raise
+    except Exception as exc:
+        await _raise_load_error(page, "login_failed", "Login ins Klassenbuch fehlgeschlagen", exc)
+
+
+def _overview_url() -> str:
+    settings = get_settings()
+    parsed = urlsplit(settings.klassenbuch_url or "https://klassenbuch.gfn.de/login")
+    if not parsed.scheme or not parsed.netloc:
+        return "https://klassenbuch.gfn.de/overview"
+    return urlunsplit((parsed.scheme, parsed.netloc, "/overview", "", ""))
+
+
+async def _open_overview(page) -> None:
+    await page.goto(_overview_url(), wait_until="domcontentloaded")
+    try:
+        await page.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:
+        pass
+    if "/login" in page.url.lower():
+        await _raise_load_error(page, "overview_loaded", "Login ins Klassenbuch fehlgeschlagen")
+    if not await _is_any_visible(page, KLASSENBUCH_SELECTORS["overview_url_marker"]):
+        await _raise_load_error(page, "overview_loaded", "Timeout beim Warten auf Uebersichtstabelle")
+    await _safe_screenshot(page, "klassenbuch_overview_loaded")
+
+
+def _normalize_table_key(value: str) -> str:
+    normalized = value.strip().lower()
+    replacements = {
+        "\u00e4": "ae",
+        "\u00f6": "oe",
+        "\u00fc": "ue",
+        "\u00df": "ss",
+        "\u00c4": "ae",
+        "\u00d6": "oe",
+        "\u00dc": "ue",
+    }
+    for source, target in replacements.items():
+        normalized = normalized.replace(source, target)
+    normalized = re.sub(r"\s+", " ", normalized)
+    normalized = re.sub(r"[^a-z0-9 ]+", "", normalized).strip()
+    aliases = {
+        "raum": "raum",
+        "nummer": "nummer",
+        "nr": "nummer",
+        "titel": "titel",
+        "beginn": "beginn",
+        "begin": "beginn",
+        "ende": "ende",
+        "einsatzzeit von": "einsatzzeit_von",
+        "einsatzzeitvon": "einsatzzeit_von",
+        "von": "einsatzzeit_von",
+        "einsatzzeit bis": "einsatzzeit_bis",
+        "einsatzzeitbis": "einsatzzeit_bis",
+        "bis": "einsatzzeit_bis",
+        "status": "status",
+        "datum": "datum",
+        "bearbeiten": "bearbeiten",
+        "aktion": "bearbeiten",
+        "aktionen": "bearbeiten",
+    }
+    return aliases.get(normalized, normalized.replace(" ", "_"))
+
+
+async def _visible_table(page):
+    tables = page.locator("table")
+    for index in range(await tables.count()):
+        table = tables.nth(index)
+        try:
+            if await table.is_visible() and await table.locator("tr").count():
+                return table
+        except Exception:
+            continue
+    return None
+
+
+async def read_table_headers(page) -> dict[str, int]:
+    table = await _visible_table(page)
+    if table is None:
+        return {}
+    header_cells = table.locator("thead th")
+    if not await header_cells.count():
+        header_cells = table.locator("tr").first().locator("th")
+    if not await header_cells.count():
+        header_cells = table.locator("tr").first().locator("td")
+    headers: dict[str, int] = {}
+    for index in range(await header_cells.count()):
+        text = (await header_cells.nth(index).inner_text()).strip()
+        key = _normalize_table_key(text)
+        if key:
+            headers[key] = index
+    return headers
+
+
+def _cell_value(cells: list[str], headers: dict[str, int], key: str) -> str:
+    index = headers.get(key)
+    if index is None or index >= len(cells):
+        return ""
+    return cells[index].strip()
+
+
+def _tab_key(tab_name: str) -> str:
+    normalized = _normalize_table_key(tab_name)
+    if "ueberfaellige" in normalized:
+        return "ueberfaellige"
+    if "freigegebene" in normalized:
+        return "freigegebene"
+    if "korrektur" in normalized:
+        return "korrektur"
+    return "offene"
+
+
+def _extract_edit_action_index(onclick: str) -> str:
+    match = re.search(r"forwardToWizardWithPreselection\((\d+)\)", onclick or "")
+    return match.group(1) if match else ""
+
+
+async def _row_edit_action(row) -> tuple[bool, str, str, str]:
+    for selector in KLASSENBUCH_SELECTORS["edit_button"]:
+        try:
+            locator = row.locator(selector).first()
+            if await locator.count() and await locator.is_visible():
+                href = ""
+                onclick = ""
+                try:
+                    href = await locator.get_attribute("href") or ""
+                except Exception:
+                    href = ""
+                try:
+                    onclick = await locator.get_attribute("onclick") or ""
+                except Exception:
+                    onclick = ""
+                if not href:
+                    try:
+                        parent_link = locator.locator("xpath=ancestor-or-self::a[1]").first()
+                        href = await parent_link.get_attribute("href") or ""
+                        onclick = onclick or await parent_link.get_attribute("onclick") or ""
+                    except Exception:
+                        href = ""
+                if href and href != "#":
+                    href = urljoin(get_settings().klassenbuch_url, href)
+                else:
+                    href = ""
+                return True, href, onclick, _extract_edit_action_index(onclick)
+        except Exception:
+            continue
+    return False, "", "", ""
+
+
+async def read_table_by_headers(page, tab_name: str) -> list[dict]:
+    table = await _visible_table(page)
+    if table is None:
+        return []
+    headers = await read_table_headers(page)
+    rows = table.locator("tbody tr")
+    if not await rows.count():
+        rows = table.locator("tr")
+    entries: list[dict] = []
+    for index in range(await rows.count()):
+        row = rows.nth(index)
+        if await row.locator("th").count():
+            continue
+        cells_locator = row.locator("td")
+        cell_count = await cells_locator.count()
+        if not cell_count:
+            continue
+        cells = [(await cells_locator.nth(cell_index).inner_text()).strip() for cell_index in range(cell_count)]
+        raw = " | ".join(cell for cell in cells if cell)
+        if not raw:
+            continue
+        editable, edit_href, edit_onclick, edit_action_index = await _row_edit_action(row)
+        row_index = ""
+        try:
+            row_index = await row.get_attribute("data-index") or ""
+        except Exception:
+            row_index = ""
+        row_index = row_index or str(index)
+        if headers:
+            entry = {
+                "tab": tab_name,
+                "raum": _cell_value(cells, headers, "raum") or "unbekannt",
+                "nummer": _cell_value(cells, headers, "nummer"),
+                "titel": _cell_value(cells, headers, "titel"),
+                "beginn": _cell_value(cells, headers, "beginn"),
+                "ende": _cell_value(cells, headers, "ende"),
+                "einsatzzeit_von": _cell_value(cells, headers, "einsatzzeit_von"),
+                "einsatzzeit_bis": _cell_value(cells, headers, "einsatzzeit_bis"),
+                "status": _cell_value(cells, headers, "status"),
+                "datum": _cell_value(cells, headers, "datum"),
+                "editable": editable,
+                "edit_href": edit_href,
+                "edit_onclick": edit_onclick,
+                "edit_action_index": edit_action_index,
+                "row_index": row_index,
+                "raw": raw,
+            }
+        else:
+            entry = _row_to_entry(raw, index)
+            entry["tab"] = tab_name
+            entry["editable"] = editable
+            entry["edit_href"] = edit_href
+            entry["edit_onclick"] = edit_onclick
+            entry["edit_action_index"] = edit_action_index
+            entry["row_index"] = row_index
+        entry["id"] = f"{_tab_key(tab_name)}-{row_index}"
+        entry["title"] = entry.get("titel") or entry.get("title") or raw[:80]
+        entry["number"] = entry.get("nummer") or entry.get("number") or ""
+        entry["date"] = entry.get("datum") or entry.get("beginn") or entry.get("date") or ""
+        entries.append(entry)
+    return entries
+
+
+async def read_overview_table(page, tab_name: str) -> list[dict]:
+    return await read_table_by_headers(page, tab_name)
+
+
+async def read_current_tab_table(page, tab_name: str) -> list[dict]:
+    return await read_overview_table(page, tab_name)
+
+
+async def _click_overview_tab(page, key: str, tab_name: str) -> None:
+    selectors = KLASSENBUCH_SELECTORS["overview_tabs"][key]
+    tab = await _locator_or_none(page, selectors)
+    if tab is None:
+        raise RuntimeError(f"Tab nicht gefunden: {tab_name}")
+    await tab.click()
+    try:
+        await page.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:
+        pass
+    await page.wait_for_timeout(700)
+    await _safe_screenshot(page, f"klassenbuch_tab_{key}_loaded")
+
+
+async def read_all_overview_tabs(page) -> tuple[list[dict], dict[str, list[dict]], list[dict[str, str]]]:
+    entries: list[dict] = []
+    groups: dict[str, list[dict]] = {tab_name: [] for _, tab_name in OVERVIEW_TABS}
+    tab_errors: list[dict[str, str]] = []
+    for key, tab_name in OVERVIEW_TABS:
+        try:
+            await _click_overview_tab(page, key, tab_name)
+            tab_entries = await read_table_by_headers(page, tab_name)
+            groups[tab_name] = tab_entries
+            entries.extend(tab_entries)
+        except Exception as exc:
+            screenshot_path = await _safe_screenshot(page, f"klassenbuch_tab_{key}_error")
+            html_snapshot_path = await _safe_html_snapshot(page, f"klassenbuch_tab_{key}_error")
+            tab_errors.append(
+                {
+                    "tab": tab_name,
+                    "step": f"tab_{key}",
+                    "message": _exception_message(exc, "Tab konnte nicht gelesen werden"),
+                    "exception_type": type(exc).__name__,
+                    "screenshot_path": screenshot_path,
+                    "html_snapshot_path": html_snapshot_path,
+                }
+            )
+    return entries, groups, tab_errors
+
+
+async def _overview_diagnostics(page, screenshot_path: str = "", html_snapshot_path: str = "") -> dict:
+    table_count = 0
+    row_count = 0
+    tab_names: list[str] = []
+    try:
+        table_count = await page.locator("table").count()
+        row_count = await page.locator("table tr").count()
+        tab_candidates = page.locator('[role="tab"], button, a')
+        for index in range(min(await tab_candidates.count(), 80)):
+            text = (await tab_candidates.nth(index).inner_text()).strip()
+            if "Themendokumentationen" in text or "Korrektur" in text:
+                tab_names.append(text)
+    except Exception:
+        pass
+    return {
+        "current_url": page.url,
+        "page_title": await page.title(),
+        "tabs_found": tab_names,
+        "tab_names_found": tab_names,
+        "table_count": table_count,
+        "row_count": row_count,
+        "screenshot_path": screenshot_path,
+        "html_snapshot_path": html_snapshot_path,
+    }
 
 
 def _row_to_entry(text: str, index: int) -> dict[str, str]:
     parts = [part.strip() for part in text.splitlines() if part.strip()]
     joined = " | ".join(parts)
+    number = next((part for part in parts if re.fullmatch(r"[A-Z0-9]{4,}", part, flags=re.IGNORECASE)), "")
     return {
         "id": f"row-{index}",
         "row_index": str(index),
         "title": parts[0] if parts else joined[:80],
         "date": next((part for part in parts if "." in part or "-" in part), ""),
-        "number": next((part for part in parts if part.isdigit()), ""),
+        "number": number,
         "room": "",
         "begin": "",
         "end": "",
@@ -98,22 +448,46 @@ def _row_to_entry(text: str, index: int) -> dict[str, str]:
 
 
 async def load_open_klassenbuecher() -> list[dict[str, str]]:
+    result = await load_klassenbuecher_overview()
+    return result["items"]
+
+
+async def load_klassenbuecher_overview() -> dict:
     async with browser_page() as page:
-        await _login(page)
-        await first_visible(page, KLASSENBUCH_SELECTORS["overview_markers"])
-        await _safe_screenshot(page, "klassenbuch_overview_loaded")
-        entries: list[dict[str, str]] = []
-        rows = await table_rows(page)
-        for index, row in enumerate(rows):
-            text = (await row.inner_text()).strip()
-            if "offen" not in text.lower():
-                continue
-            entries.append(_row_to_entry(text, index))
-        return entries
+        try:
+            await _login(page)
+            await _open_overview(page)
+            entries, groups, tab_errors = await read_all_overview_tabs(page)
+            diagnostics = await _overview_diagnostics(page)
+            diagnostics["tab_errors"] = tab_errors
+            if not entries:
+                screenshot_path = await _safe_screenshot(page, "klassenbuch_overview_no_rows")
+                html_snapshot_path = await _safe_html_snapshot(page, "klassenbuch_overview_no_rows")
+                diagnostics = await _overview_diagnostics(page, screenshot_path, html_snapshot_path)
+                diagnostics["step"] = "overview_no_rows"
+                diagnostics["tab_errors"] = tab_errors
+            return {"ok": True, "items": entries, "groups": groups, "diagnostics": diagnostics, "count": len(entries)}
+        except KlassenbuchLoadError:
+            raise
+        except Exception as exc:
+            await _raise_load_error(page, "overview_read", "Klassenbuecher konnten nicht geladen werden", exc)
 
 
 async def _select_entry(page, payload: dict) -> None:
     selected = payload.get("klassenbuch") or payload.get("selected_klassenbuch") or {}
+    edit_href = selected.get("edit_href")
+    if edit_href:
+        await page.goto(urljoin(page.url, str(edit_href)), wait_until="domcontentloaded")
+        try:
+            await page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+        await _safe_screenshot(page, "klassenbuch_entry_selected")
+        await _ensure_wizard_loaded(page)
+        return
+    if selected.get("row_index") is not None:
+        await _open_selected_entry_from_overview(page, selected)
+        return
     row_index = selected.get("row_index") or payload.get("row_index")
     rows = await table_rows(page)
     if row_index is not None and str(row_index).isdigit():
@@ -142,21 +516,120 @@ async def _select_entry(page, payload: dict) -> None:
         raise RuntimeError("Bearbeiten-Button im offenen Klassenbuch-Eintrag nicht gefunden.")
     await page.wait_for_load_state("networkidle")
     await _safe_screenshot(page, "klassenbuch_entry_selected")
+    await _ensure_wizard_loaded(page)
+
+
+async def _open_selected_entry_from_overview(page, selected: dict) -> None:
+    await _open_overview(page)
+    tab_name = str(selected.get("tab") or "offene Themendokumentationen")
+    key = _tab_key(tab_name)
+    await _click_overview_tab(page, key, tab_name)
+    row_index = str(selected.get("row_index"))
+    row = page.locator(f'tr[data-index="{row_index}"]').first()
+    if not await row.count():
+        diagnostics = await _failure_diagnostics(page, "wizard_open")
+        raise KlassenbuchLoadError(f'Klassenbuch-Zeile mit data-index="{row_index}" wurde nicht gefunden.', diagnostics)
+    for selector in KLASSENBUCH_SELECTORS["edit_button"]:
+        try:
+            button = row.locator(selector).first()
+            if await button.count() and await button.is_visible() and await button.is_enabled():
+                await button.click()
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=5000)
+                except Exception:
+                    pass
+                await _safe_screenshot(page, "klassenbuch_entry_selected")
+                await _ensure_wizard_loaded(page)
+                return
+        except Exception:
+            continue
+    action_index = selected.get("edit_action_index")
+    if action_index is not None and str(action_index).isdigit():
+        try:
+            await page.evaluate("index => classbookApp.overview.forwardToWizardWithPreselection(Number(index))", str(action_index))
+            try:
+                await page.wait_for_load_state("networkidle", timeout=5000)
+            except Exception:
+                pass
+            await _safe_screenshot(page, "klassenbuch_entry_selected")
+            await _ensure_wizard_loaded(page)
+            return
+        except Exception:
+            pass
+    diagnostics = await _failure_diagnostics(page, "wizard_open")
+    raise KlassenbuchLoadError("Klassenbuch-Bearbeitungsseite konnte nicht geoeffnet werden.", diagnostics)
+
+
+async def _ensure_wizard_loaded(page) -> None:
+    if "/classbooks/wizard/new" in page.url.lower() or await _is_any_visible(page, KLASSENBUCH_SELECTORS["wizard_markers"]):
+        return
+    diagnostics = await _failure_diagnostics(page, "wizard_open")
+    raise KlassenbuchLoadError("Klassenbuch-Bearbeitungsseite konnte nicht geoeffnet werden.", diagnostics)
+
+
+async def _ue_textarea_locators(page) -> list:
+    selector_groups = [
+        'textarea[name^="classBookEntry-"]',
+        'textarea[id^="classBookEntry-"]',
+        "textarea.ueEntry",
+        'textarea:near(:text("Themendokumentation bearbeiten"))',
+        "textarea",
+    ]
+    for selector in selector_groups:
+        locators = page.locator(selector)
+        visible = []
+        for index in range(await locators.count()):
+            locator = locators.nth(index)
+            try:
+                if await locator.is_visible() and await locator.is_enabled():
+                    visible.append(locator)
+            except Exception:
+                continue
+        if len(visible) >= 9:
+            indexed: list[tuple[int, object]] = []
+            for fallback_index, locator in enumerate(visible):
+                field_name = ""
+                try:
+                    field_name = (await locator.get_attribute("name")) or (await locator.get_attribute("id")) or ""
+                except Exception:
+                    field_name = ""
+                match = re.search(r"classBookEntry-(\d+)", field_name)
+                indexed.append((int(match.group(1)) if match else fallback_index, locator))
+            return [locator for _, locator in sorted(indexed, key=lambda item: item[0])[:9]]
+    return []
+
+
+async def fill_ue_textareas(page, ue_items: list[dict]) -> None:
+    if len(ue_items) != 9:
+        raise RuntimeError("Es muessen genau 9 UE fuer die Klassenbuch-Befuellung vorhanden sein.")
+    fields = await _ue_textarea_locators(page)
+    if len(fields) < 9:
+        diagnostics = await _failure_diagnostics(page, "ue_textareas")
+        raise KlassenbuchLoadError("Nicht genug classBookEntry-Textareas fuer 9 UE gefunden.", diagnostics)
+    for index, item in enumerate(ue_items):
+        content = str(item.get("content") or item.get("lehrinhalt") or "").strip()
+        if len(content) < 40:
+            diagnostics = await _failure_diagnostics(page, "ue_validation")
+            raise KlassenbuchLoadError(f"UE {index + 1} ist zu kurz ({len(content)} Zeichen, mindestens 40).", diagnostics)
+        if len(content) > 220:
+            diagnostics = await _failure_diagnostics(page, "ue_validation")
+            raise KlassenbuchLoadError(f"UE {index + 1} ist zu lang ({len(content)} Zeichen, maximal 220).", diagnostics)
+        await fields[index].fill(content)
+        actual = (await fields[index].input_value()).strip()
+        if actual != content:
+            diagnostics = await _failure_diagnostics(page, "ue_fill")
+            raise KlassenbuchLoadError(f"UE {index + 1} konnte nicht korrekt in classBookEntry-{index} eingetragen werden.", diagnostics)
 
 
 async def _fill_ue(page, payload: dict) -> None:
     await optional_click(page, KLASSENBUCH_SELECTORS["ue_tab"])
-    await page.wait_for_load_state("networkidle")
+    try:
+        await page.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:
+        pass
     await _safe_screenshot(page, "klassenbuch_ue_opened")
     ue_items = payload.get("ue_items") or payload.get("unterrichtseinheiten") or []
-    if len(ue_items) != 9:
-        raise RuntimeError("Es muessen genau 9 UE fuer die Klassenbuch-Befuellung vorhanden sein.")
-    fields = page.locator(", ".join(KLASSENBUCH_SELECTORS["content_fields"]))
-    if await fields.count() < 9:
-        raise RuntimeError("Nicht genug Lehrinhalt-Felder fuer 9 UE gefunden.")
-    for index, item in enumerate(ue_items):
-        content = item.get("content") or item.get("lehrinhalt") or ""
-        await fields.nth(index).fill(str(content))
+    await fill_ue_textareas(page, ue_items)
     await select_teaching_formats_for_all_rows(page, len(ue_items))
     await _safe_screenshot(page, "klassenbuch_ue_filled")
 
@@ -178,13 +651,44 @@ async def _visible_locators(page, selectors: Sequence[str]) -> list:
     return []
 
 
-async def open_teaching_format_modal(page, row_index: int):
+async def _teaching_format_control_for_row(page, row_index: int):
+    textarea = page.locator(f'textarea[name="classBookEntry-{row_index}"]').first()
+    if not await textarea.count():
+        textarea = page.locator(f"#classBookEntry-{row_index}").first()
+    try:
+        if await textarea.count() and await textarea.is_visible():
+            row = textarea.locator("xpath=ancestor::tr[1]").first()
+            if await row.count():
+                for selector in ['div[id^="classBookEntry2-"]', '[data-target="#id-modal-lessons"]', '[data-toggle="modal"]', ".ueEntryButtonGroup button", ".input-group-addon.ueEntryButtonGroup button", "button", '[role="button"]']:
+                    controls = row.locator(selector)
+                    for control_index in range(await controls.count()):
+                        control = controls.nth(control_index)
+                        if await control.is_visible() and await control.is_enabled():
+                            return control
+            container = textarea.locator("xpath=ancestor::*[contains(@class, 'input-group')][1]").first()
+            if await container.count():
+                control = container.locator('div[id^="classBookEntry2-"], [data-target="#id-modal-lessons"], [data-toggle="modal"], .ueEntryButtonGroup button, button').first()
+                if await control.count() and await control.is_visible() and await control.is_enabled():
+                    return control
+    except Exception:
+        pass
     controls = await _visible_locators(page, KLASSENBUCH_SELECTORS["teaching_format_fields"])
-    if len(controls) <= row_index:
+    if len(controls) > row_index:
+        return controls[row_index]
+    return None
+
+
+async def open_teaching_format_for_ue(page, index: int):
+    return await open_teaching_format_modal(page, index)
+
+
+async def open_teaching_format_modal(page, row_index: int):
+    control = await _teaching_format_control_for_row(page, row_index)
+    if control is None:
         await _safe_screenshot(page, "lernformat_modal_error")
         _set_klassenbuch_step(StepState.error, f"Lernformat-Feld fuer UE {row_index + 1} nicht gefunden.")
         raise RuntimeError(f"Lernformat-Feld fuer UE {row_index + 1} nicht gefunden.")
-    await controls[row_index].click()
+    await control.click()
     modal = await _locator_or_none(page, KLASSENBUCH_SELECTORS["teaching_format_modal"][:4])
     if modal is None and await _is_any_visible(page, KLASSENBUCH_SELECTORS["teaching_format_modal"]):
         modal = page.locator("body")
@@ -291,6 +795,7 @@ async def _save_ue(page) -> None:
     status_service.set_step("klassenbuch", StepState.running, "Unterrichtseinheiten werden gespeichert.")
     await click_first(page, KLASSENBUCH_SELECTORS["save_button"], "Speichern")
     await page.wait_for_load_state("networkidle")
+    await _safe_screenshot(page, "klassenbuch_saved_success")
     status_service.set_step("klassenbuch", StepState.success, "Alle 9 UE wurden gespeichert.")
 
 
@@ -458,16 +963,10 @@ async def prepare_klassenbuch(payload: dict) -> ApiMessage:
             await _login(page)
             await _select_entry(page, payload)
             await _fill_ue(page, payload)
-            await _open_signature_step(page)
-            await _recognize_signature_page(page)
-            try:
-                await _fill_signature(page, allow_overwrite=False)
-            except RuntimeError as exc:
-                if "bereits befuellt" not in str(exc):
-                    raise
-            screenshot = await _safe_screenshot(page, "klassenbuch_signature_dry_run")
-            _set_signature_step(StepState.skipped, "Dry-Run: Signatur vorbereitet, aber nicht abgeschlossen.")
-            return ApiMessage(ok=True, message="Dry-Run: Signatur vorbereitet, aber nicht abgeschlossen.", data={"payload": payload, "screenshot": screenshot})
+            screenshot = await _safe_screenshot(page, "klassenbuch_ue_dry_run")
+            status_service.set_step("klassenbuch", StepState.skipped, "Dry-Run: UE wurden eingetragen, aber nicht gespeichert.")
+            _set_signature_step(StepState.skipped, "Dry-Run: Signatur wurde nicht gestartet.")
+            return ApiMessage(ok=True, message="Dry-Run: UE wurden eingetragen, aber nicht gespeichert.", data={"payload": payload, "screenshot": screenshot})
         except Exception as exc:
             screenshot = await _safe_screenshot(page, "klassenbuch_signature_error")
             return ApiMessage(ok=False, message=f"Klassenbuch-Dry-Run fehlgeschlagen: {exc}", data={"screenshot": screenshot})
