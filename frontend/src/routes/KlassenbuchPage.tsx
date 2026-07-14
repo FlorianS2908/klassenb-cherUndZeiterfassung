@@ -5,6 +5,7 @@ import { RangeSelector } from '../components/RangeSelector/RangeSelector';
 import { UeEditor } from '../components/UeEditor/UeEditor';
 import { analyzeFile, getOpenAiStatus, previewRange, uploadFile } from '../services/fileService';
 import { saveAnalysisHistory } from '../services/analysisHistoryService';
+import { diagnosticFileUrl, getLatestKlassenbuchDiagnostics } from '../services/diagnosticsService';
 import { getOpenKlassenbuecher, prepareKlassenbuch } from '../services/klassenbuchService';
 import type { AnalysisResult, KlassenbuchDiagnostics, KlassenbuchEntry, UeItem, UploadedFileInfo } from '../types';
 import { ApiError } from '../services/api';
@@ -39,6 +40,31 @@ function klassenbuchError(error: unknown): { message: string; diagnostics: Klass
   return { message: String(error), diagnostics: null };
 }
 
+function fileName(path?: string) {
+  if (!path) return '';
+  return path.replace(/\\/g, '/').split('/').pop() ?? '';
+}
+
+function DiagnosticLinks({ diagnostics }: { diagnostics: KlassenbuchDiagnostics }) {
+  const runId = diagnostics.run_id;
+  const links = [
+    ['Screenshot', diagnostics.screenshot_path || diagnostics.screenshots?.[diagnostics.screenshots.length - 1]],
+    ['HTML-Snapshot', diagnostics.html_snapshot_path || diagnostics.html_snapshots?.[diagnostics.html_snapshots.length - 1]],
+    ['Console-Log', diagnostics.console_log],
+    ['Network-Log', diagnostics.network_log],
+    ['Playwright Trace', diagnostics.trace_path || diagnostics.trace_file],
+  ];
+  if (!runId) return null;
+  return (
+    <div className="actions">
+      {links.map(([label, path]) => {
+        const name = fileName(path);
+        return name ? <a className="secondary" key={label} href={diagnosticFileUrl(runId, name)} target="_blank" rel="noreferrer">{label}</a> : null;
+      })}
+    </div>
+  );
+}
+
 export function KlassenbuchPage() {
   const [file, setFile] = useState<UploadedFileInfo | null>(null);
   const [selection, setSelection] = useState('');
@@ -53,9 +79,11 @@ export function KlassenbuchPage() {
   const [selectedBook, setSelectedBook] = useState<KlassenbuchEntry | null>(null);
   const [webRunMessage, setWebRunMessage] = useState('');
   const [loadingBooks, setLoadingBooks] = useState(false);
+  const [latestDiagnostics, setLatestDiagnostics] = useState<KlassenbuchDiagnostics | null>(null);
 
   useEffect(() => {
     getOpenAiStatus().then(setOpenAi);
+    getLatestKlassenbuchDiagnostics().then((result) => setLatestDiagnostics(result as KlassenbuchDiagnostics)).catch(() => undefined);
   }, []);
 
   async function onFile(next: File) {
@@ -86,12 +114,14 @@ export function KlassenbuchPage() {
       setOpenBooks(result.items);
       setBookGroups(groupKlassenbuecher(result.items, result.groups));
       setBookDiagnostics(result.diagnostics ?? null);
+      setLatestDiagnostics((result.diagnostics ?? null) as KlassenbuchDiagnostics | null);
       setWebRunMessage(`${result.count ?? result.items.length} Klassenbuecher geladen.`);
     } catch (error) {
       const parsedError = klassenbuchError(error);
       setOpenBooks([]);
       setBookGroups(groupKlassenbuecher([]));
       setBookDiagnostics(parsedError.diagnostics);
+      setLatestDiagnostics(parsedError.diagnostics);
       setWebRunMessage(`Klassenbuecher konnten nicht geladen werden: ${parsedError.message}`);
     } finally {
       setLoadingBooks(false);
@@ -174,8 +204,10 @@ export function KlassenbuchPage() {
             <p>Titel: {bookDiagnostics.page_title || '-'}</p>
             <p>Tabs: {(bookDiagnostics.tabs_found ?? bookDiagnostics.tab_names_found)?.join(', ') || '-'}</p>
             <p>Tabellen: {bookDiagnostics.table_count ?? 0} · Zeilen: {bookDiagnostics.row_count ?? 0}</p>
+            <p>Diagnoseordner: {bookDiagnostics.diagnostics_folder || '-'}</p>
             {bookDiagnostics.screenshot_path && <p>Screenshot: {bookDiagnostics.screenshot_path}</p>}
             {bookDiagnostics.html_snapshot_path && <p>HTML-Snapshot: {bookDiagnostics.html_snapshot_path}</p>}
+            <DiagnosticLinks diagnostics={bookDiagnostics} />
             {bookDiagnostics.tab_errors && bookDiagnostics.tab_errors.length > 0 && (
               <ul>
                 {bookDiagnostics.tab_errors.map((tabError, index) => (
@@ -229,6 +261,25 @@ export function KlassenbuchPage() {
         <div className="actions">
           <button className="primary" onClick={prepareSelectedBook} disabled={!selectedBook || items.length !== 9}>Dry-Run Klassenbuch vorbereiten</button>
         </div>
+      </section>
+      <section className="panel">
+        <div className="page-head">
+          <h2>Diagnose</h2>
+          <button className="secondary" onClick={() => getLatestKlassenbuchDiagnostics().then((result) => setLatestDiagnostics(result as KlassenbuchDiagnostics))}>Letzte Diagnose oeffnen</button>
+        </div>
+        {latestDiagnostics?.run_id ? (
+          <div className="banner info">
+            <p><strong>Letzter Klassenbuch-Lauf:</strong> {latestDiagnostics.run_id}</p>
+            <p>Ergebnis: {latestDiagnostics.success ? 'Erfolg' : 'Fehler'} · Eintraege: {latestDiagnostics.entries_returned ?? '-'}</p>
+            <p>Fehler: {latestDiagnostics.error_message || '-'}</p>
+            <p>Schritt: {latestDiagnostics.step || '-'}</p>
+            <p>URL: {latestDiagnostics.current_url || '-'}</p>
+            <p>Titel: {latestDiagnostics.page_title || '-'}</p>
+            <p>Tabellen: {latestDiagnostics.table_count ?? latestDiagnostics.tables_found ?? '-'} · Zeilen: {latestDiagnostics.row_count ?? latestDiagnostics.rows_found ?? '-'}</p>
+            <p>Diagnoseordner: {latestDiagnostics.diagnostics_folder || '-'}</p>
+            <DiagnosticLinks diagnostics={latestDiagnostics} />
+          </div>
+        ) : <p className="muted">Noch kein Klassenbuch-Diagnoselauf vorhanden.</p>}
       </section>
     </>
   );

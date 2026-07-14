@@ -7,7 +7,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import routes_analysis_history, routes_error_report, routes_files, routes_klassenbuch, routes_logs, routes_review, routes_screenshots, routes_settings, routes_setup, routes_status, routes_timebutler
+from app.api import routes_analysis_history, routes_diagnostics, routes_error_report, routes_files, routes_klassenbuch, routes_logs, routes_review, routes_screenshots, routes_settings, routes_setup, routes_status, routes_timebutler
 from app.config import ensure_runtime_ready, get_settings, resolve_project_path
 from app.scheduler import create_scheduler
 
@@ -48,6 +48,7 @@ def create_app() -> FastAPI:
         routes_settings.router,
         routes_logs.router,
         routes_error_report.router,
+        routes_diagnostics.router,
     ]:
         app.include_router(router)
 

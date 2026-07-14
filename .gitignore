@@ -6,6 +6,7 @@ node_modules/
 dist/
 logs/
 screenshots/
+diagnostics/
 error_reports/
 uploads/
 analysis_history/
@@ -21,6 +22,7 @@ secrets/
 credentials/
 .pytest_cache/
 .pytest_tmp/
+.test_tmp/
 pytest-cache-files-*/
 .mypy_cache/
 start_test.log

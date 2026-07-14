@@ -81,6 +81,9 @@ export interface KlassenbuchEntry {
 }
 
 export interface KlassenbuchDiagnostics {
+  run_id?: string;
+  diagnostics_folder?: string;
+  summary_path?: string;
   step?: string;
   current_url?: string;
   page_title?: string;
@@ -89,10 +92,21 @@ export interface KlassenbuchDiagnostics {
   tab_errors?: Array<Record<string, string>>;
   table_count?: number;
   row_count?: number;
+  tables_found?: number;
+  rows_found?: number;
+  tbody_row_count?: number;
   screenshots?: string[];
+  html_snapshots?: string[];
   screenshot_path?: string;
   html_snapshot_path?: string;
+  trace_path?: string;
+  trace_file?: string;
+  console_log?: string;
+  network_log?: string;
   exception_type?: string;
+  entries_returned?: number;
+  error_message?: string;
+  success?: boolean;
 }
 
 export interface KlassenbuchOpenResponse {
