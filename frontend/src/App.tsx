@@ -12,7 +12,9 @@ import { SettingsPage } from './routes/SettingsPage';
 import { SetupPage } from './routes/SetupPage';
 import { TimebutlerPage } from './routes/TimebutlerPage';
 import { NotFoundPage } from './routes/NotFoundPage';
+import { FileAnalysisPage } from './routes/FileAnalysisPage';
 import { checkSetup } from './services/setupService';
+import { useWorkflowState } from './state/workflowState';
 
 const pagePaths: Record<string, string> = {
   dashboard: '/',
@@ -20,6 +22,7 @@ const pagePaths: Record<string, string> = {
   timebutler: '/timebutler',
   review: '/review',
   'analysis-history': '/analysis-history',
+  analysis: '/analysis',
   screenshots: '/screenshots',
   logs: '/logs',
   settings: '/settings',
@@ -36,6 +39,7 @@ function pageFromPath(pathname: string) {
     '/timebutler': 'timebutler',
     '/review': 'review',
     '/analysis-history': 'analysis-history',
+    '/analysis': 'analysis',
     '/screenshots': 'screenshots',
     '/logs': 'logs',
     '/settings': 'settings',
@@ -46,8 +50,22 @@ function pageFromPath(pathname: string) {
 export default function App() {
   const initialPage = pageFromPath(window.location.pathname);
   const [page, setPageState] = useState(initialPage);
+  const { workflow, setWorkflow, resetWorkflow } = useWorkflowState();
   const setPage = (nextPage: string) => {
+    if (nextPage === 'analysis' && !workflow.selectedClassbook) {
+      setPageState('klassenbuch');
+      window.history.replaceState(null, '', '/klassenbuch');
+      return;
+    }
+    if (nextPage === 'review' && (!workflow.analysisDone || workflow.generatedEntries.length !== 9)) {
+      setPageState('analysis');
+      window.history.replaceState(null, '', '/analysis');
+      return;
+    }
     setPageState(nextPage);
+    setWorkflow({
+      currentStep: nextPage === 'dashboard' ? 'overview' : nextPage === 'klassenbuch' ? 'classbooks' : nextPage === 'analysis' ? 'analysis' : nextPage === 'review' ? 'review' : workflow.currentStep,
+    });
     const path = pagePaths[nextPage] ?? '/';
     window.history.replaceState(null, '', path);
   };
@@ -57,9 +75,10 @@ export default function App() {
   }, []);
   const pages: Record<string, ReactNode> = {
     dashboard: <DashboardPage setPage={setPage} />,
-    klassenbuch: <KlassenbuchPage setPage={setPage} />,
+    klassenbuch: <KlassenbuchPage setPage={setPage} workflow={workflow} setWorkflow={setWorkflow} />,
+    analysis: <FileAnalysisPage setPage={setPage} workflow={workflow} setWorkflow={setWorkflow} />,
     timebutler: <TimebutlerPage />,
-    review: <ReviewPage />,
+    review: <ReviewPage setPage={setPage} workflow={workflow} setWorkflow={setWorkflow} />,
     'analysis-history': <AnalysisHistoryPage />,
     screenshots: <ScreenshotsPage />,
     logs: <LogsPage />,
@@ -68,7 +87,7 @@ export default function App() {
     'not-found': <NotFoundPage setPage={setPage} />,
   };
   return (
-    <Layout page={page} setPage={setPage}>
+    <Layout page={page} setPage={setPage} workflow={workflow} resetWorkflow={resetWorkflow}>
       <AppErrorBoundary resetKey={page} setPage={setPage}>{pages[page] ?? pages['not-found']}</AppErrorBoundary>
     </Layout>
   );

@@ -50,3 +50,40 @@ def test_app_routes_setup_not_found_and_error_boundary():
     assert "window.addEventListener('error'" in boundary
     assert "Zum Setup" in boundary
     assert "Login testen" in (ROOT / "frontend" / "src" / "routes" / "KlassenbuchPage.tsx").read_text(encoding="utf-8")
+
+
+def test_guided_klassenbuch_workflow_contracts():
+    app = (ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+    layout = (ROOT / "frontend" / "src" / "components" / "Layout" / "Layout.tsx").read_text(encoding="utf-8")
+    workflow = (ROOT / "frontend" / "src" / "state" / "workflowState.ts").read_text(encoding="utf-8")
+    klassenbuch = (ROOT / "frontend" / "src" / "routes" / "KlassenbuchPage.tsx").read_text(encoding="utf-8")
+    analysis = (ROOT / "frontend" / "src" / "routes" / "FileAnalysisPage.tsx").read_text(encoding="utf-8")
+    review = (ROOT / "frontend" / "src" / "routes" / "ReviewPage.tsx").read_text(encoding="utf-8")
+
+    assert "'/analysis': 'analysis'" in app
+    assert "FileAnalysisPage" in app
+    assert "workflow.selectedClassbook" in app
+    assert "workflow.generatedEntries.length !== 9" in app
+    assert "localStorage" in workflow
+    assert "selectedClassbook" in workflow
+    assert "generatedEntries" in workflow
+    assert "resetWorkflow" in workflow
+    assert "1 Uebersicht" in layout
+    assert "2 Klassenbuecher" in layout
+    assert "3 Datei & Analyse" in layout
+    assert "4 Review" in layout
+    assert "Workflow zuruecksetzen" in layout
+    assert "Erweiterte Tools" in layout
+    assert "selectedClassbook" in layout
+    assert "Auswaehlen & weiter" in klassenbuch
+    assert "setPage('analysis')" in klassenbuch
+    assert "setWorkflow({" in klassenbuch
+    assert "Kein Klassenbuch ausgewaehlt" in analysis
+    assert "KI-Analyse starten" in analysis
+    assert "Array.from({ length: 9 }" in analysis
+    assert "Zur Review" in analysis
+    assert "normalizeEntries" in analysis
+    assert "Review noch nicht verfuegbar" in review
+    assert "Ich habe die Eintraege geprueft" in review
+    assert "Ins Klassenbuch eintragen" in review
+    assert "prepareKlassenbuch" in review

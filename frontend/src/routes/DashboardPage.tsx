@@ -17,7 +17,7 @@ export function DashboardPage({ setPage }: { setPage: (page: string) => void }) 
       <div className="page-head">
         <div>
           <h1>Dashboard</h1>
-          <p>Lokales Automatisierungstool fuer Klassenbuch und Zeiterfassung</p>
+          <p>Lokales Automatisierungstool fuer Klassenbuch-Eintraege</p>
         </div>
         <ErrorReportButton />
       </div>
@@ -33,10 +33,8 @@ export function DashboardPage({ setPage }: { setPage: (page: string) => void }) 
         <StepTimeline steps={status.steps} />
       </section>
       <section className="actions">
-        <button className="primary" onClick={() => setPage('klassenbuch')}>Datei hochladen</button>
-        <button className="secondary" onClick={() => setPage('klassenbuch')}>Klassenbuch vorbereiten</button>
-        <button className="secondary" onClick={() => setPage('timebutler')}>Zeiterfassung vorbereiten</button>
-        <button className="secondary" onClick={() => setPage('review')}>Zur Review</button>
+        <button className="primary" onClick={() => setPage('klassenbuch')}>Workflow starten</button>
+        <button className="secondary" onClick={() => setPage('klassenbuch')}>Klassenbuch auswaehlen</button>
       </section>
     </>
   );

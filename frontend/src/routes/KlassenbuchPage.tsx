@@ -1,15 +1,9 @@
 import { useEffect, useState } from 'react';
-import { ExtractedTextPreview } from '../components/ExtractedTextPreview/ExtractedTextPreview';
-import { FileUpload } from '../components/FileUpload/FileUpload';
-import { RangeSelector } from '../components/RangeSelector/RangeSelector';
-import { UeEditor } from '../components/UeEditor/UeEditor';
-import { analyzeFile, getOpenAiStatus, previewRange, uploadFile } from '../services/fileService';
-import { saveAnalysisHistory } from '../services/analysisHistoryService';
 import { checkKlassenbuchBrowserHealth, diagnosticFileUrl, exportLatestKlassenbuchDiagnostic, getLatestKlassenbuchDiagnostics } from '../services/diagnosticsService';
-import { deleteKlassenbuchCredentials, getKlassenbuchCredentialStatus, getOpenKlassenbuecher, prepareKlassenbuch, saveKlassenbuchCredentials, testKlassenbuchLoginDirect } from '../services/klassenbuchService';
-import { getStatus } from '../services/statusService';
-import type { AnalysisResult, AppStatus, KlassenbuchDiagnostics, KlassenbuchEntry, UeItem, UploadedFileInfo } from '../types';
+import { deleteKlassenbuchCredentials, getKlassenbuchCredentialStatus, getOpenKlassenbuecher, saveKlassenbuchCredentials, testKlassenbuchLoginDirect } from '../services/klassenbuchService';
 import { ApiError } from '../services/api';
+import type { KlassenbuchDiagnostics, KlassenbuchEntry } from '../types';
+import type { WorkflowState } from '../state/workflowState';
 
 const KLASSENBUCH_GROUPS = [
   'offene Themendokumentationen',
@@ -103,19 +97,18 @@ function DiagnosticStatusCards({ diagnostics }: { diagnostics: KlassenbuchDiagno
   return <div className="cards small-cards">{cards.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>;
 }
 
-export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }) {
-  const [file, setFile] = useState<UploadedFileInfo | null>(null);
-  const [selection, setSelection] = useState('');
-  const [preview, setPreview] = useState({ text: '', length: 0 });
-  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
-  const [items, setItems] = useState<UeItem[]>([]);
-  const [message, setMessage] = useState('');
-  const [openAi, setOpenAi] = useState<{ active: boolean; key_present: boolean; source: string; message: string; display_path: string; model: string; max_input_chars: number } | null>(null);
-  const [appStatus, setAppStatus] = useState<AppStatus | null>(null);
+export function KlassenbuchPage({
+  setPage,
+  workflow,
+  setWorkflow,
+}: {
+  setPage: (page: string) => void;
+  workflow: WorkflowState;
+  setWorkflow: (patch: Partial<WorkflowState>) => void;
+}) {
   const [openBooks, setOpenBooks] = useState<KlassenbuchEntry[]>([]);
   const [bookGroups, setBookGroups] = useState<Record<string, KlassenbuchEntry[]>>(groupKlassenbuecher([]));
   const [bookDiagnostics, setBookDiagnostics] = useState<KlassenbuchDiagnostics | null>(null);
-  const [selectedBook, setSelectedBook] = useState<KlassenbuchEntry | null>(null);
   const [webRunMessage, setWebRunMessage] = useState('');
   const [loadingBooks, setLoadingBooks] = useState(false);
   const [latestDiagnostics, setLatestDiagnostics] = useState<KlassenbuchDiagnostics | null>(null);
@@ -132,8 +125,6 @@ export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }
   const [lastLoginTest, setLastLoginTest] = useState('Noch nicht getestet');
 
   useEffect(() => {
-    getOpenAiStatus().then(setOpenAi);
-    getStatus().then(setAppStatus).catch(() => undefined);
     getLatestKlassenbuchDiagnostics().then((result) => setLatestDiagnostics(result as KlassenbuchDiagnostics)).catch(() => undefined);
     refreshCredentialStatus();
   }, []);
@@ -142,26 +133,6 @@ export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }
     const response = await getKlassenbuchCredentialStatus();
     const data = (response as { data?: Record<string, unknown> }).data ?? {};
     setCredentialStatus(data);
-  }
-
-  async function onFile(next: File) {
-    const result = await uploadFile(next);
-    if (result.ok) setFile(result.data);
-    setMessage(result.message);
-  }
-
-  async function loadPreview() {
-    if (!file) return;
-    const result = await previewRange(file.file_id, file.filename, selection);
-    setPreview({ text: result.text_preview, length: result.text_length });
-  }
-
-  async function analyze() {
-    if (!file) return;
-    const result = await analyzeFile(file.file_id, file.filename, selection);
-    setAnalysis(result);
-    setItems(result.ue_items);
-    await saveAnalysisHistory({ ...result, filename: file.filename, selection });
   }
 
   async function loadOpenBooks() {
@@ -192,18 +163,18 @@ export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }
     }
   }
 
-  async function prepareSelectedBook() {
-    if (!selectedBook || items.length !== 9) {
-      setWebRunMessage('Bitte zuerst ein Klassenbuch auswaehlen und genau 9 UE erzeugen.');
-      return;
-    }
-    const result = await prepareKlassenbuch({
-      klassenbuch: selectedBook,
-      ue_items: items,
-      file: file?.filename,
-      selected_range: selection,
+  function selectBook(book: KlassenbuchEntry) {
+    setWorkflow({
+      selectedClassbook: book,
+      uploadedFile: null,
+      selectedRange: '',
+      generatedEntries: [],
+      analysisDone: false,
+      reviewDone: false,
+      currentStep: 'analysis',
     });
-    setWebRunMessage(JSON.stringify(result, null, 2));
+    setWebRunMessage(`Klassenbuch ausgewaehlt: ${book.titel || book.title || book.nummer || book.number || book.datum || book.date || book.raw || 'unbekannt'}`);
+    setPage('analysis');
   }
 
   async function openLatestDiagnostics() {
@@ -227,7 +198,7 @@ export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }
       const ok = Boolean((response as { ok?: boolean }).ok);
       setLastLoginTest(ok ? 'Erfolgreich' : 'Fehlgeschlagen');
       setWebRunMessage(ok ? 'Login erfolgreich.' : 'Login fehlgeschlagen. Die lokal gespeicherten Zugangsdaten wurden abgelehnt.');
-    } catch (error) {
+    } catch {
       setLastLoginTest('Fehlgeschlagen');
       setWebRunMessage('Login-Test konnte nicht ausgefuehrt werden.');
     } finally {
@@ -247,7 +218,7 @@ export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }
       setCredentialPassword('');
       await refreshCredentialStatus();
       setCredentialMessage('Klassenbuch-Zugangsdaten wurden lokal gespeichert.');
-    } catch (error) {
+    } catch {
       setCredentialMessage('Zugangsdaten konnten nicht lokal gespeichert werden.');
     } finally {
       setSavingCredentials(false);
@@ -262,7 +233,7 @@ export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }
       setCredentialPassword('');
       await refreshCredentialStatus();
       setCredentialMessage('Lokale Klassenbuch-Zugangsdaten wurden geloescht.');
-    } catch (error) {
+    } catch {
       setCredentialMessage('Lokale Zugangsdaten konnten nicht geloescht werden.');
     } finally {
       setDeletingCredentials(false);
@@ -275,7 +246,7 @@ export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }
       const result = await exportLatestKlassenbuchDiagnostic();
       setDiagnosticExport(result);
       setWebRunMessage(`Fehlerbericht exportiert: ${String(result.export_folder ?? '-')}`);
-    } catch (error) {
+    } catch {
       setDiagnosticExport(null);
       setWebRunMessage('Noch keine Diagnose vorhanden. Bitte zuerst Klassenbuecher laden.');
     } finally {
@@ -313,50 +284,7 @@ export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }
           <button className="secondary" onClick={deleteCredentials} disabled={deletingCredentials}>{deletingCredentials ? 'Loescht...' : 'Lokale Zugangsdaten loeschen'}</button>
         </div>
       </section>
-      <FileUpload onFile={onFile} />
-      {message && <div className="banner info">{message}</div>}
-      {file && (
-        <section className="panel">
-          <h2>{file.filename}</h2>
-          <p>{file.file_type}: {file.total_items} {file.unit_label}</p>
-          <RangeSelector value={selection} onChange={setSelection} unit={file.unit_label} />
-          <div className="actions">
-            <button className="secondary" onClick={loadPreview}>Vorschau laden</button>
-            <button className="primary" onClick={analyze}>Analyse starten</button>
-          </div>
-        </section>
-      )}
-      <section className="panel">
-        <h2>KI-Status</h2>
-        <div className="cards small-cards">
-          <div><span>OpenAI API aktiv</span><strong>{openAi?.active ? 'ja' : 'nein'}</strong></div>
-          <div><span>API-Key vorhanden</span><strong>{openAi?.key_present ? 'ja' : 'nein'}</strong></div>
-          <div><span>Quelle</span><strong>{openAi?.source ?? '-'}</strong></div>
-          <div><span>Modell</span><strong>{openAi?.model ?? '-'}</strong></div>
-          <div><span>Browser-Modus</span><strong>{appStatus?.browser_mode ?? '-'}</strong></div>
-        </div>
-        {openAi && !openAi.active && <div className="banner warning">{openAi.message}</div>}
-        {openAi?.display_path && <p className="muted">Key-Datei: {openAi.display_path}</p>}
-        <div className="actions">
-          <button className="primary" disabled={!file || !openAi?.active} onClick={analyze}>KI-Analyse starten</button>
-          <button className="secondary" disabled={!file || !openAi?.active} onClick={analyze}>KI-Ergebnis neu generieren</button>
-          <button className="secondary" disabled={!file} onClick={analyze}>Manuell ohne KI fortfahren</button>
-        </div>
-      </section>
-      <ExtractedTextPreview text={preview.text} length={preview.length} />
-      {analysis && (
-        <section className="panel">
-          <h2>Erkannte Themen</h2>
-          <p>Confidence: {(analysis.confidence_score * 100).toFixed(0)}%</p>
-          <p>KI verwendet: {analysis.ai_used ? 'ja' : 'nein'} · Modell: {analysis.ai_model || '-'}</p>
-          {analysis.ai_truncated && <div className="banner warning">Extrahierter Text wurde vor der KI-Analyse gekuerzt.</div>}
-          {analysis.ai_warnings.length > 0 && <div className="banner warning">{analysis.ai_warnings.join(' ')}</div>}
-          <p>Ausgewertet: {analysis.range.selected.join(', ')}</p>
-          <p>Der Analyse-Lauf wurde in der Historie gespeichert.</p>
-          <div className="chips">{analysis.topics.map((topic) => <span key={topic}>{topic}</span>)}</div>
-        </section>
-      )}
-      {items.length > 0 && <UeEditor items={items} onChange={setItems} />}
+
       <section className="panel">
         <div className="page-head">
           <h2>Klassenbuecher</h2>
@@ -368,6 +296,11 @@ export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }
             <button className="secondary" onClick={() => setPage('setup')}>Zum Setup</button>
           </div>
         </div>
+        {workflow.selectedClassbook && (
+          <div className="banner info">
+            Ausgewaehlt: {workflow.selectedClassbook.titel || workflow.selectedClassbook.title || workflow.selectedClassbook.raw || '-'}
+          </div>
+        )}
         {webRunMessage && <div className="banner info">{webRunMessage}</div>}
         {openBooks.length === 0 && bookDiagnostics && (
           <div className="banner warning">
@@ -378,7 +311,7 @@ export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }
             <p>URL: {bookDiagnostics.current_url || '-'}</p>
             <p>Titel: {bookDiagnostics.page_title || '-'}</p>
             <p>Tabs: {(bookDiagnostics.tabs_found ?? bookDiagnostics.tab_names_found)?.join(', ') || '-'}</p>
-            <p>Tabellen: {bookDiagnostics.table_count ?? 0} · Zeilen: {bookDiagnostics.row_count ?? 0}</p>
+            <p>Tabellen: {bookDiagnostics.table_count ?? 0} / Zeilen: {bookDiagnostics.row_count ?? 0}</p>
             <p>Diagnoseordner: {bookDiagnostics.diagnostics_folder || '-'}</p>
             {bookDiagnostics.screenshot_path && <p>Screenshot: {bookDiagnostics.screenshot_path}</p>}
             {bookDiagnostics.html_snapshot_path && <p>HTML-Snapshot: {bookDiagnostics.html_snapshot_path}</p>}
@@ -424,7 +357,7 @@ export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }
                       <td>{book.ende || '-'}</td>
                       <td>{book.einsatzzeit_von || '-'} - {book.einsatzzeit_bis || '-'}</td>
                       <td>{book.editable ? 'ja' : 'nein'}</td>
-                      <td><button className="secondary" onClick={() => setSelectedBook(book)}>Auswaehlen</button></td>
+                      <td><button className="secondary" onClick={() => selectBook(book)}>Auswaehlen & weiter</button></td>
                     </tr>
                   ))}
                   {groupItems.length === 0 && <tr><td colSpan={10}>Keine Eintraege in dieser Gruppe.</td></tr>}
@@ -433,14 +366,12 @@ export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }
             </div>
           );
         })}
-        <div className="actions">
-          <button className="primary" onClick={prepareSelectedBook} disabled={!selectedBook || items.length !== 9}>Dry-Run Klassenbuch vorbereiten</button>
-        </div>
       </section>
+
       <section className="panel">
         <div className="page-head">
           <h2>Diagnose</h2>
-          <button className="secondary" onClick={() => getLatestKlassenbuchDiagnostics().then((result) => setLatestDiagnostics(result as KlassenbuchDiagnostics))}>Letzte Diagnose oeffnen</button>
+          <button className="secondary" onClick={openLatestDiagnostics}>Letzte Diagnose oeffnen</button>
           <button className="secondary" onClick={runBrowserHealth}>Browser-Check ausfuehren</button>
           <button className="secondary" onClick={exportSanitizedDiagnostic} disabled={exportingDiagnostic}>{exportingDiagnostic ? 'Exportiert...' : 'Fehlerbericht fuers Repo exportieren'}</button>
         </div>
@@ -452,7 +383,7 @@ export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }
         )}
         {browserHealth && (
           <div className={browserHealth.ok ? 'banner info' : 'banner warning'}>
-            <p><strong>Browser-Check:</strong> {browserHealth.ok ? 'ok' : 'Fehler'} · Schritt: {String(browserHealth.step ?? '-')}</p>
+            <p><strong>Browser-Check:</strong> {browserHealth.ok ? 'ok' : 'Fehler'} / Schritt: {String(browserHealth.step ?? '-')}</p>
             <p>{String(browserHealth.message ?? '')}</p>
           </div>
         )}
@@ -472,14 +403,14 @@ export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }
               </div>
             )}
             <p><strong>Letzter Klassenbuch-Lauf:</strong> {latestDiagnostics.run_id}</p>
-            <p>Ergebnis: {latestDiagnostics.success ? 'Erfolg' : 'Fehler'} · Eintraege: {latestDiagnostics.entries_returned ?? '-'}</p>
+            <p>Ergebnis: {latestDiagnostics.success ? 'Erfolg' : 'Fehler'} / Eintraege: {latestDiagnostics.entries_returned ?? '-'}</p>
             <p>Fehler: {latestDiagnostics.error_message || '-'}</p>
             <p>Wahrscheinliche Ursache: {latestDiagnostics.probable_cause || '-'}</p>
             <p>Naechste Aktion: {latestDiagnostics.next_action || '-'}</p>
             <p>Schritt: {latestDiagnostics.step || '-'}</p>
             <p>URL: {latestDiagnostics.current_url || '-'}</p>
             <p>Titel: {latestDiagnostics.page_title || '-'}</p>
-            <p>Tabellen: {latestDiagnostics.table_count ?? latestDiagnostics.tables_found ?? '-'} · Zeilen: {latestDiagnostics.row_count ?? latestDiagnostics.rows_found ?? '-'}</p>
+            <p>Tabellen: {latestDiagnostics.table_count ?? latestDiagnostics.tables_found ?? '-'} / Zeilen: {latestDiagnostics.row_count ?? latestDiagnostics.rows_found ?? '-'}</p>
             <p>Diagnoseordner: {latestDiagnostics.diagnostics_folder || '-'}</p>
             <DiagnosticStatusCards diagnostics={latestDiagnostics} />
             <DiagnosticLinks diagnostics={latestDiagnostics} />

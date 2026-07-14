@@ -15,7 +15,16 @@ button { border: 0; cursor: pointer; }
 .sidebar nav { display: grid; gap: 8px; }
 .sidebar button { display: flex; align-items: center; gap: 10px; color: #dbe5ef; background: transparent; padding: 12px; border-radius: 8px; text-align: left; }
 .sidebar button.active, .sidebar button:hover { background: #243647; color: #fff; }
+.sidebar button:disabled { opacity: 0.45; cursor: not-allowed; }
 .main { padding: 30px; max-width: 1320px; width: 100%; }
+.topbar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 18px; position: relative; }
+.gear-menu { position: relative; }
+.gear-dropdown { position: absolute; right: 0; top: 46px; z-index: 4; min-width: 220px; display: grid; gap: 4px; background: white; border: 1px solid #dbe5ef; border-radius: 8px; padding: 8px; box-shadow: 0 12px 32px rgba(16, 24, 32, 0.18); }
+.gear-dropdown button { justify-content: flex-start; display: flex; gap: 8px; align-items: center; min-height: 36px; background: transparent; border-radius: 6px; padding: 8px; color: #17202a; }
+.gear-dropdown button:hover { background: #eef3f8; }
+body.dark { background: #101820; color: #e9eef4; }
+body.dark .panel, body.dark .status-card, body.dark .ue-card, body.dark .gear-dropdown { background: #17202a; color: #e9eef4; border-color: #32465a; }
+body.dark p, body.dark .muted { color: #b7c4d1; }
 .page-head { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
 h1 { margin: 0; font-size: 32px; }
 h2 { margin-top: 0; font-size: 20px; }
