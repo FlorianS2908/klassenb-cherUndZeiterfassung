@@ -1,4 +1,4 @@
-import { BookOpen, Camera, ClipboardCheck, FileClock, FileText, LayoutDashboard, Settings, Timer, ScrollText } from 'lucide-react';
+import { BookOpen, Camera, ClipboardCheck, FileClock, FileText, KeyRound, LayoutDashboard, Settings, Timer, ScrollText } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 const nav = [
@@ -9,6 +9,7 @@ const nav = [
   ['analysis-history', 'Historie', FileClock],
   ['screenshots', 'Screenshots', Camera],
   ['logs', 'Logs', ScrollText],
+  ['setup', 'Setup', KeyRound],
   ['settings', 'Einstellungen', Settings],
 ] as const;
 

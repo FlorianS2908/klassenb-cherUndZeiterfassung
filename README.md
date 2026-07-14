@@ -14,17 +14,17 @@ Der Standardmodus ist immer Dry-Run. Finale Aktionen wie Speichern, Signieren od
 install.bat
 ```
 
-Das Skript erstellt `.venv`, installiert Backend-Abhaengigkeiten, installiert Playwright-Browser, installiert Frontend-Abhaengigkeiten und startet den Setup-Assistenten.
+Das Skript erstellt `.venv`, installiert Backend-Abhaengigkeiten, installiert Playwright-Browser und installiert Frontend-Abhaengigkeiten. Zugangsdaten werden nicht in der Konsole abgefragt.
 
 ## Setup
 
-```bat
-setup_env.bat
-```
+Das Setup laeuft in der Weboberflaeche. Beim ersten Start ohne `.env` oeffnet `start_tool.bat` automatisch [http://localhost:5173/setup](http://localhost:5173/setup). Alternativ kann `setup_env.bat` genutzt werden; die Datei startet ebenfalls das Web-Setup.
 
-Der Assistent erzeugt lokal eine `.env`. Passwoerter und API-Keys werden verdeckt mit `getpass.getpass()` abgefragt. Zugangsdaten werden nicht in README, Tests, Beispielausgaben oder Code geschrieben.
+Die Weboberflaeche erzeugt lokal eine `.env`. Passwoerter und API-Keys werden nicht im Frontend angezeigt, nicht geloggt und nicht von der Setup-API zurueckgegeben.
 
 Wenn `TIMEBUTLER_USERNAME` oder `TIMEBUTLER_PASSWORD` leer sind, nutzt das Backend automatisch die Klassenbuch-Zugangsdaten.
+
+Der alte Konsolen-Assistent `setup_env.py` bleibt nur als manueller Legacy-Fallback erhalten und wird nicht automatisch gestartet.
 
 ## Start
 
@@ -143,7 +143,7 @@ Fehlerberichte enthalten Status, Logs und Screenshots, aber keine Passwoerter, A
 ## Fehlerbehebung
 
 - `.venv` fehlt: `install.bat` ausfuehren.
-- `.env` fehlt: `setup_env.bat` ausfuehren.
+- `.env` fehlt: `start_tool.bat` ausfuehren und das Setup im Browser abschliessen.
 - Frontend startet nicht: Node.js/npm pruefen und `update_dependencies.bat` ausfuehren.
 - Backend startet nicht: Python 3.11+ pruefen und Backend-Abhaengigkeiten installieren.
 - Ungueltiger Bereich: Syntax wie `1-5, 8, 10-12` verwenden.

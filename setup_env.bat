@@ -1,16 +1,8 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-if not exist ".venv\Scripts\activate.bat" (
-  echo Virtuelle Umgebung fehlt. Bitte zuerst install.bat ausfuehren.
-  pause
-  exit /b 1
-)
-call .venv\Scripts\activate.bat
-python setup_env.py
-if errorlevel 1 (
-  echo Setup fehlgeschlagen.
-  pause
-  exit /b 1
-)
-pause
+echo Das Setup laeuft jetzt in der Weboberflaeche.
+echo Der alte Konsolen-Assistent setup_env.py bleibt nur als Fallback erhalten.
+call start_tool.bat
+timeout /t 3 /nobreak >nul
+start http://localhost:5173/setup

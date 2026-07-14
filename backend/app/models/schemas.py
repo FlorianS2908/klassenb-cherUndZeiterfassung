@@ -109,6 +109,97 @@ class SubmitRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class SetupDefaults(BaseModel):
+    klassenbuch_url: str
+    timebutler_url: str
+    klassenbuch_username: str = ""
+    timebutler_username: str = ""
+    use_separate_timebutler_credentials: bool = False
+    openai_api_key_file: str = ""
+    openai_model: str = "gpt-4o-mini"
+    openai_max_input_chars: int = 30000
+    openai_timeout_seconds: int = 60
+    openai_retry_count: int = 2
+    openai_temperature: float = 0.2
+    auto_submit: bool = False
+    default_signature: str = "Schaffer"
+    upload_folder: str = "./uploads"
+    screenshot_folder: str = "./screenshots"
+    log_folder: str = "./logs"
+    error_report_folder: str = "./error_reports"
+    analysis_history_folder: str = "./analysis_history"
+    reference_screenshot_dir: str = ""
+    timebutler_project: str = "FbW"
+    timebutler_category: str = "Training/Coaching"
+    timebutler_start: str = "08:30"
+    timebutler_end: str = "16:30"
+    timebutler_pause: str = "45m"
+    timebutler_remark: str = "Training/Coaching im Rahmen der FbW-Unterrichtsdurchfuehrung"
+    federal_state: str = "BW"
+    blocked_dates: str = ""
+    vacation_dates: str = ""
+    sick_dates: str = ""
+    desktop_notifications: bool = True
+    auto_open_browser: bool = True
+    auto_dry_run_on_start: bool = False
+    github_remote_url: str = ""
+    git_default_branch: str = "main"
+
+
+class SetupPayload(SetupDefaults):
+    klassenbuch_password: str = ""
+    timebutler_password: str = ""
+    openai_api_key: str = ""
+
+    @field_validator(
+        "klassenbuch_url",
+        "timebutler_url",
+        "klassenbuch_username",
+        "openai_model",
+        "default_signature",
+        "timebutler_project",
+        "timebutler_category",
+        "timebutler_start",
+        "timebutler_end",
+        "timebutler_pause",
+        "timebutler_remark",
+        "federal_state",
+        "git_default_branch",
+    )
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator(
+        "timebutler_username",
+        "openai_api_key_file",
+        "openai_api_key",
+        "reference_screenshot_dir",
+        "blocked_dates",
+        "vacation_dates",
+        "sick_dates",
+        "github_remote_url",
+    )
+    @classmethod
+    def strip_optional_text(cls, value: str) -> str:
+        return value.strip()
+
+
+class SetupCheckResult(BaseModel):
+    env_exists: bool
+    setup_required: bool
+    missing: list[str] = Field(default_factory=list)
+    messages: list[str] = Field(default_factory=list)
+    config_public: dict[str, Any] = Field(default_factory=dict)
+
+
+class OpenAiKeyFileCheck(BaseModel):
+    exists: bool
+    readable: bool
+    has_content: bool
+    message: str
+
+
 class ApiMessage(BaseModel):
     ok: bool
     message: str

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { apiGet } from '../services/api';
 import { getOpenAiStatus } from '../services/fileService';
 
-export function SettingsPage() {
+export function SettingsPage({ setPage }: { setPage: (page: string) => void }) {
   const [settings, setSettings] = useState<unknown>(null);
   const [openAi, setOpenAi] = useState<unknown>(null);
   useEffect(() => {
@@ -16,7 +16,7 @@ export function SettingsPage() {
         <h2>OpenAI API</h2>
         <pre className="preview">{JSON.stringify(openAi, null, 2)}</pre>
         <div className="actions">
-          <button className="secondary" onClick={() => fetch('http://localhost:8000/api/setup/run', { method: 'POST' })}>Setup-Assistent starten</button>
+          <button className="secondary" onClick={() => setPage('setup')}>Setup oeffnen</button>
           <button className="secondary" onClick={() => getOpenAiStatus().then(setOpenAi)}>API-Key-Datei pruefen</button>
         </div>
       </section>

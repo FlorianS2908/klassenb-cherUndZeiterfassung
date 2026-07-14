@@ -160,13 +160,12 @@ if not exist "frontend\node_modules" (
   echo [OK] Frontend-Abhaengigkeiten vorhanden.
 )
 
+set SETUP_REQUIRED=false
 if not exist ".env" (
+  set SETUP_REQUIRED=true
   echo.
-  echo [SETUP] Keine .env gefunden. Setup-Assistent wird gestartet.
-  echo Zugangsdaten werden verdeckt abgefragt und nicht angezeigt.
-  echo.
-  python setup_env.py
-  if errorlevel 1 goto error
+  echo [SETUP] Keine .env gefunden. Das Setup wird im Browser geoeffnet.
+  echo Zugangsdaten werden nicht in der Konsole abgefragt.
 ) else (
   echo [OK] .env gefunden.
 )
@@ -210,12 +209,20 @@ timeout /t 3 /nobreak >nul
 start "Klassenbuch Tool Frontend TEST" cmd /k ".tools\run_frontend_test.cmd"
 
 timeout /t 7 /nobreak >nul
-start http://localhost:5173
+if "%SETUP_REQUIRED%"=="true" (
+  start http://localhost:5173/setup
+) else (
+  start http://localhost:5173
+)
 
 echo.
 echo [OK] Teststart wurde angestossen.
 echo Wenn der Browser nicht automatisch oeffnet:
-echo http://localhost:5173
+if "%SETUP_REQUIRED%"=="true" (
+  echo http://localhost:5173/setup
+) else (
+  echo http://localhost:5173
+)
 echo.
 pause
 exit /b 0

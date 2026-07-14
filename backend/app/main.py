@@ -24,7 +24,7 @@ def configure_logging() -> None:
 
 
 def create_app() -> FastAPI:
-    ok, messages = ensure_runtime_ready(run_setup_if_missing=True)
+    ok, messages = ensure_runtime_ready(run_setup_if_missing=False)
     configure_logging()
     for message in messages:
         logging.warning(message)

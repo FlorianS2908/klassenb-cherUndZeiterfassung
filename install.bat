@@ -34,9 +34,9 @@ cd frontend
 npm install
 if errorlevel 1 goto error
 cd ..
-python setup_env.py
-if errorlevel 1 goto error
-echo Installation abgeschlossen. Das Tool kann mit start_tool.bat gestartet werden.
+echo Installation abgeschlossen.
+echo Das Tool kann mit start_tool.bat gestartet werden.
+echo Falls noch keine .env existiert, oeffnet sich das Setup automatisch im Browser.
 pause
 exit /b 0
 :error

@@ -58,3 +58,67 @@ export interface TimebutlerPayload {
   pause: string;
   remark: string;
 }
+
+export interface SetupDefaults {
+  klassenbuch_url: string;
+  timebutler_url: string;
+  klassenbuch_username: string;
+  timebutler_username: string;
+  use_separate_timebutler_credentials: boolean;
+  openai_api_key_file: string;
+  openai_model: string;
+  openai_max_input_chars: number;
+  openai_timeout_seconds: number;
+  openai_retry_count: number;
+  openai_temperature: number;
+  auto_submit: boolean;
+  default_signature: string;
+  upload_folder: string;
+  screenshot_folder: string;
+  log_folder: string;
+  error_report_folder: string;
+  analysis_history_folder: string;
+  reference_screenshot_dir: string;
+  timebutler_project: string;
+  timebutler_category: string;
+  timebutler_start: string;
+  timebutler_end: string;
+  timebutler_pause: string;
+  timebutler_remark: string;
+  federal_state: string;
+  blocked_dates: string;
+  vacation_dates: string;
+  sick_dates: string;
+  desktop_notifications: boolean;
+  auto_open_browser: boolean;
+  auto_dry_run_on_start: boolean;
+  github_remote_url: string;
+  git_default_branch: string;
+}
+
+export interface SetupPayload extends SetupDefaults {
+  klassenbuch_password: string;
+  timebutler_password: string;
+  openai_api_key: string;
+}
+
+export interface SetupCheckResult {
+  env_exists: boolean;
+  setup_required: boolean;
+  missing: string[];
+  messages: string[];
+  config_public: Record<string, unknown>;
+}
+
+export interface ApiMessage<T = Record<string, unknown>> {
+  ok: boolean;
+  message: string;
+  data: T;
+}
+
+export interface OpenAiKeyFileCheck {
+  exists: boolean;
+  readable: boolean;
+  has_content: boolean;
+  message: string;
+}

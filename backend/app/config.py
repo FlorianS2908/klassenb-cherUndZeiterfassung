@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 from functools import lru_cache
 from pathlib import Path
 
@@ -103,7 +101,7 @@ class Settings(BaseModel):
 
 @lru_cache
 def get_settings() -> Settings:
-    load_dotenv(ENV_PATH)
+    load_dotenv(ENV_PATH, override=True)
     def env(name: str, default: str = "") -> str:
         return os.getenv(name, default)
 
@@ -173,10 +171,7 @@ def resolve_project_path(value: str) -> Path:
 def ensure_runtime_ready(run_setup_if_missing: bool = False) -> tuple[bool, list[str]]:
     messages: list[str] = []
     if not ENV_PATH.exists():
-        messages.append("Keine .env gefunden. Setup wird gestartet." if run_setup_if_missing else "Keine .env gefunden.")
-        if run_setup_if_missing:
-            subprocess.run([sys.executable, str(ROOT_DIR / "setup_env.py")], cwd=ROOT_DIR, check=False)
-            get_settings.cache_clear()
+        messages.append("Keine .env gefunden. Bitte Setup in der Weboberflaeche abschliessen.")
     settings = get_settings()
     missing = []
     for key, value in {
