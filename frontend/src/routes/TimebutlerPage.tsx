@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { TimebutlerEditor } from '../components/TimebutlerEditor/TimebutlerEditor';
-import { getTimebutlerDefaults, prepareTimebutler } from '../services/timebutlerService';
+import { getTimebutlerDefaults, prepareTimebutler, submitTimebutler } from '../services/timebutlerService';
 import type { TimebutlerPayload } from '../types';
 
 export function TimebutlerPage() {
@@ -19,8 +19,8 @@ export function TimebutlerPage() {
       <div className="page-head"><h1>Zeiterfassung</h1></div>
       <TimebutlerEditor value={payload} onChange={setPayload} onReset={() => setPayload(defaults)} />
       <div className="actions">
-        <button className="secondary" onClick={async () => setMessage(JSON.stringify(await prepareTimebutler(payload)))}>Zeiterfassung pruefen</button>
-        <button className="primary" onClick={async () => setMessage(JSON.stringify(await prepareTimebutler(payload)))}>Zeiterfassung eintragen</button>
+        <button className="secondary" onClick={async () => setMessage(JSON.stringify(await prepareTimebutler(payload), null, 2))}>Dry-Run Zeiterfassung vorbereiten</button>
+        <button className="primary" onClick={async () => setMessage(JSON.stringify(await submitTimebutler(payload, false), null, 2))}>Final speichern pruefen</button>
       </div>
       {message && <pre className="preview">{message}</pre>}
     </>

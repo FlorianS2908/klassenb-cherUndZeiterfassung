@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-
-def open_klassenbuecher_stub() -> list[dict[str, str]]:
-    return [
-        {"id": "dry-run-1", "title": "Offenes Klassenbuch", "date": "Zieltag", "status": "Offen"},
-    ]
+from app.browser.automation_klassenbuch import load_open_klassenbuecher
 
 
 def ensure_open_status(entry: dict[str, str]) -> bool:

@@ -5,7 +5,18 @@ import { RangeSelector } from '../components/RangeSelector/RangeSelector';
 import { UeEditor } from '../components/UeEditor/UeEditor';
 import { analyzeFile, getOpenAiStatus, previewRange, uploadFile } from '../services/fileService';
 import { saveAnalysisHistory } from '../services/analysisHistoryService';
+import { getOpenKlassenbuecher, prepareKlassenbuch } from '../services/klassenbuchService';
 import type { AnalysisResult, UeItem, UploadedFileInfo } from '../types';
+
+interface KlassenbuchEntry {
+  id: string;
+  row_index?: string;
+  title?: string;
+  date?: string;
+  number?: string;
+  status?: string;
+  raw?: string;
+}
 
 export function KlassenbuchPage() {
   const [file, setFile] = useState<UploadedFileInfo | null>(null);
@@ -15,6 +26,10 @@ export function KlassenbuchPage() {
   const [items, setItems] = useState<UeItem[]>([]);
   const [message, setMessage] = useState('');
   const [openAi, setOpenAi] = useState<{ active: boolean; key_present: boolean; source: string; message: string; display_path: string; model: string; max_input_chars: number } | null>(null);
+  const [openBooks, setOpenBooks] = useState<KlassenbuchEntry[]>([]);
+  const [selectedBook, setSelectedBook] = useState<KlassenbuchEntry | null>(null);
+  const [webRunMessage, setWebRunMessage] = useState('');
+  const [loadingBooks, setLoadingBooks] = useState(false);
 
   useEffect(() => {
     getOpenAiStatus().then(setOpenAi);
@@ -38,6 +53,34 @@ export function KlassenbuchPage() {
     setAnalysis(result);
     setItems(result.ue_items);
     await saveAnalysisHistory({ ...result, filename: file.filename, selection });
+  }
+
+  async function loadOpenBooks() {
+    setLoadingBooks(true);
+    setWebRunMessage('');
+    try {
+      const result = await getOpenKlassenbuecher();
+      setOpenBooks(result.items);
+      setWebRunMessage(`${result.items.length} offene Klassenbuecher geladen.`);
+    } catch (error) {
+      setWebRunMessage(`Offene Klassenbuecher konnten nicht geladen werden: ${error}`);
+    } finally {
+      setLoadingBooks(false);
+    }
+  }
+
+  async function prepareSelectedBook() {
+    if (!selectedBook || items.length !== 9) {
+      setWebRunMessage('Bitte zuerst ein Klassenbuch auswaehlen und genau 9 UE erzeugen.');
+      return;
+    }
+    const result = await prepareKlassenbuch({
+      klassenbuch: selectedBook,
+      ue_items: items,
+      file: file?.filename,
+      selected_range: selection,
+    });
+    setWebRunMessage(JSON.stringify(result, null, 2));
   }
 
   return (
@@ -86,6 +129,41 @@ export function KlassenbuchPage() {
         </section>
       )}
       {items.length > 0 && <UeEditor items={items} onChange={setItems} />}
+      <section className="panel">
+        <div className="page-head">
+          <h2>Offene Klassenbuecher</h2>
+          <button className="secondary" onClick={loadOpenBooks} disabled={loadingBooks}>{loadingBooks ? 'Laedt...' : 'Offene Klassenbuecher laden'}</button>
+        </div>
+        {webRunMessage && <div className="banner info">{webRunMessage}</div>}
+        <div className="table-panel">
+          <table>
+            <thead>
+              <tr>
+                <th>Auswahl</th>
+                <th>Datum</th>
+                <th>Titel</th>
+                <th>Nummer</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {openBooks.map((book) => (
+                <tr key={book.id}>
+                  <td><input type="radio" name="klassenbuch" checked={selectedBook?.id === book.id} onChange={() => setSelectedBook(book)} /></td>
+                  <td>{book.date || '-'}</td>
+                  <td>{book.title || book.raw || '-'}</td>
+                  <td>{book.number || '-'}</td>
+                  <td>{book.status || '-'}</td>
+                </tr>
+              ))}
+              {openBooks.length === 0 && <tr><td colSpan={5}>Noch keine offenen Klassenbuecher geladen.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <div className="actions">
+          <button className="primary" onClick={prepareSelectedBook} disabled={!selectedBook || items.length !== 9}>Dry-Run Klassenbuch vorbereiten</button>
+        </div>
+      </section>
     </>
   );
 }

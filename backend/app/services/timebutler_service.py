@@ -20,4 +20,6 @@ def default_payload(target_date: date) -> TimebutlerPayload:
 
 
 def duplicate_check_stub(_: TimebutlerPayload) -> bool:
+    # The authoritative duplicate check happens in the Playwright flow after login,
+    # because Timebutler's current entries are only visible in the web UI.
     return False
