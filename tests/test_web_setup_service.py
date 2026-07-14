@@ -3,7 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from app import config
+from app.api.routes_setup import router
 from app.models.schemas import SetupPayload
 from app.services import setup_service
 
@@ -73,6 +77,26 @@ def test_check_setup_without_env_points_to_web_ui(monkeypatch):
     assert "Weboberflaeche" in result.messages[0]
 
 
+def test_check_setup_detects_missing_required_values(monkeypatch):
+    env_path = _env_path()
+    env_path.write_text(
+        'KLASSENBUCH_URL="https://klassenbuch.example"\n'
+        'TIMEBUTLER_URL="https://timebutler.example"\n'
+        'KLASSENBUCH_USERNAME=""\n'
+        'KLASSENBUCH_PASSWORD=""\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "ENV_PATH", env_path)
+    monkeypatch.setattr(setup_service, "ENV_PATH", env_path)
+    config.get_settings.cache_clear()
+
+    result = setup_service.check_setup()
+
+    assert result.setup_required is True
+    assert "KLASSENBUCH_USERNAME" in result.missing
+    assert "KLASSENBUCH_PASSWORD" in result.missing
+
+
 def test_save_setup_writes_env_without_returning_secrets(monkeypatch):
     env_path = _env_path()
     monkeypatch.setattr(config, "ENV_PATH", env_path)
@@ -86,6 +110,7 @@ def test_save_setup_writes_env_without_returning_secrets(monkeypatch):
     assert "secret-one" in content
     assert "secret-one" not in str(result)
     assert "secret-two" not in str(result)
+    assert (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines().count(".env") >= 1
 
 
 def test_save_setup_preserves_existing_password_when_form_is_empty(monkeypatch):
@@ -104,3 +129,27 @@ def test_save_setup_preserves_existing_password_when_form_is_empty(monkeypatch):
     setup_service.save_setup(_payload(klassenbuch_password=""))
 
     assert 'KLASSENBUCH_PASSWORD="kept-secret"' in env_path.read_text(encoding="utf-8")
+
+
+def test_openai_key_file_check_returns_only_status():
+    key_path = _env_path().with_name("api.key")
+    key_path.write_text("sk-secret-value", encoding="utf-8")
+
+    result = setup_service.validate_openai_key_file(str(key_path))
+
+    assert result.exists is True
+    assert result.readable is True
+    assert result.non_empty is True
+    assert "sk-secret-value" not in result.model_dump_json()
+
+
+def test_setup_run_does_not_start_console_process():
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    response = client.post("/api/setup/run")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["setup_url"] == "/setup"
+    assert "Weboberflaeche" in response.json()["message"]

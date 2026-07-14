@@ -4,8 +4,17 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-from app.config import ENV_PATH, Settings, get_settings
+from app.config import ENV_PATH, ROOT_DIR, get_settings, resolve_project_path
 from app.models.schemas import OpenAiKeyFileCheck, SetupCheckResult, SetupDefaults, SetupPayload
+
+GITIGNORE_REQUIRED_LINES = [
+    ".env",
+    "api_key*.txt",
+    "*.key",
+    "*.secret",
+    "secrets/",
+    "credentials/",
+]
 
 
 def _existing_env() -> dict[str, str]:
@@ -86,6 +95,26 @@ def _missing_from_env(values: dict[str, str]) -> list[str]:
     return missing
 
 
+def _ensure_gitignore() -> None:
+    gitignore = ROOT_DIR / ".gitignore"
+    existing = set()
+    if gitignore.exists():
+        existing = set(gitignore.read_text(encoding="utf-8").splitlines())
+    missing = [line for line in GITIGNORE_REQUIRED_LINES if line not in existing]
+    if missing:
+        with gitignore.open("a", encoding="utf-8") as handle:
+            if existing:
+                handle.write("\n")
+            handle.write("\n".join(missing) + "\n")
+
+
+def _ensure_runtime_folders(values: dict[str, str]) -> None:
+    for key in ["UPLOAD_FOLDER", "SCREENSHOT_FOLDER", "LOG_FOLDER", "ERROR_REPORT_FOLDER", "ANALYSIS_HISTORY_FOLDER"]:
+        folder = values.get(key, "").strip()
+        if folder:
+            resolve_project_path(folder).mkdir(parents=True, exist_ok=True)
+
+
 def default_setup_values() -> SetupDefaults:
     settings = get_settings()
     return SetupDefaults(
@@ -147,18 +176,18 @@ def check_setup() -> SetupCheckResult:
 
 def validate_openai_key_file(path: str) -> OpenAiKeyFileCheck:
     if not path.strip():
-        return OpenAiKeyFileCheck(exists=False, readable=False, has_content=False, message="Kein Pfad angegeben.")
+        return OpenAiKeyFileCheck(exists=False, readable=False, non_empty=False, message="Kein Pfad angegeben.")
     key_path = Path(path)
     if not key_path.exists():
-        return OpenAiKeyFileCheck(exists=False, readable=False, has_content=False, message="Datei wurde nicht gefunden.")
+        return OpenAiKeyFileCheck(exists=False, readable=False, non_empty=False, message="Datei wurde nicht gefunden.")
     try:
         content = key_path.read_text(encoding="utf-8").strip()
     except OSError:
-        return OpenAiKeyFileCheck(exists=True, readable=False, has_content=False, message="Datei ist nicht lesbar.")
+        return OpenAiKeyFileCheck(exists=True, readable=False, non_empty=False, message="Datei ist nicht lesbar.")
     return OpenAiKeyFileCheck(
         exists=True,
         readable=True,
-        has_content=bool(content),
+        non_empty=bool(content),
         message="API-Key-Datei ist lesbar." if content else "Datei ist leer.",
     )
 
@@ -174,6 +203,8 @@ def save_setup(payload: SetupPayload) -> dict[str, object]:
     existing = _existing_env()
     validate_setup_payload(payload, existing)
     values = _payload_to_env(payload, existing)
+    _ensure_gitignore()
+    _ensure_runtime_folders(values)
     lines = [
         "# Lokale Konfiguration. Diese Datei enthaelt Zugangsdaten und wird nicht committet.",
         "# Erstellt durch die Weboberflaeche unter /setup.",

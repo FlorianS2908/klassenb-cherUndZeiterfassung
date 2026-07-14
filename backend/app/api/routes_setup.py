@@ -26,7 +26,7 @@ def setup_defaults():
 
 @router.post("/validate-openai-key-file")
 def validate_key_file(payload: dict[str, str]):
-    return validate_openai_key_file(payload.get("path", ""))
+    return validate_openai_key_file(payload.get("openai_api_key_file") or payload.get("path", ""))
 
 
 @router.post("/save")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -184,6 +185,16 @@ class SetupPayload(SetupDefaults):
     def strip_optional_text(cls, value: str) -> str:
         return value.strip()
 
+    @field_validator("timebutler_start", "timebutler_end")
+    @classmethod
+    def validate_time(cls, value: str) -> str:
+        if not re.fullmatch(r"\d{2}:\d{2}", value):
+            raise ValueError("Zeit muss im Format hh:mm angegeben werden.")
+        hours, minutes = value.split(":")
+        if int(hours) > 23 or int(minutes) > 59:
+            raise ValueError("Zeit muss im Format hh:mm angegeben werden.")
+        return value
+
 
 class SetupCheckResult(BaseModel):
     env_exists: bool
@@ -196,7 +207,7 @@ class SetupCheckResult(BaseModel):
 class OpenAiKeyFileCheck(BaseModel):
     exists: bool
     readable: bool
-    has_content: bool
+    non_empty: bool
     message: str
 
 

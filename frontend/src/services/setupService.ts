@@ -10,7 +10,7 @@ export async function getSetupDefaults() {
 }
 
 export async function validateOpenAiKeyFile(path: string) {
-  return apiPost<OpenAiKeyFileCheck>('/api/setup/validate-openai-key-file', { path });
+  return apiPost<OpenAiKeyFileCheck>('/api/setup/validate-openai-key-file', { openai_api_key_file: path });
 }
 
 export async function saveSetup(payload: SetupPayload) {

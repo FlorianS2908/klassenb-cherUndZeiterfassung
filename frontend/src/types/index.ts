@@ -119,6 +119,6 @@ export interface ApiMessage<T = Record<string, unknown>> {
 export interface OpenAiKeyFileCheck {
   exists: boolean;
   readable: boolean;
-  has_content: boolean;
+  non_empty: boolean;
   message: string;
 }

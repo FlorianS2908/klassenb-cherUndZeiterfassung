@@ -1,7 +1,7 @@
-import { Eye, EyeOff, KeyRound, Save, ShieldCheck, TestTube2 } from 'lucide-react';
+import { Eye, EyeOff, KeyRound, RotateCcw, Save, ShieldCheck, TestTube2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import type { SetupPayload } from '../types';
-import { getSetupDefaults, saveSetup, validateOpenAiKeyFile } from '../services/setupService';
+import type { OpenAiKeyFileCheck, SetupPayload } from '../types';
+import { checkSetup, getSetupDefaults, saveSetup, validateOpenAiKeyFile } from '../services/setupService';
 
 const emptyPayload: SetupPayload = {
   klassenbuch_url: '',
@@ -49,14 +49,22 @@ type Props = {
 
 export function SetupPage({ setPage }: Props) {
   const [form, setForm] = useState<SetupPayload>(emptyPayload);
+  const [defaults, setDefaults] = useState<SetupPayload>(emptyPayload);
   const [status, setStatus] = useState<{ kind: 'info' | 'success' | 'error'; text: string } | null>(null);
+  const [keyStatus, setKeyStatus] = useState<OpenAiKeyFileCheck | null>(null);
+  const [envExists, setEnvExists] = useState(false);
   const [showSecrets, setShowSecrets] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     getSetupDefaults()
-      .then((defaults) => setForm({ ...emptyPayload, ...defaults }))
-      .catch((error) => setStatus({ kind: 'error', text: String(error) }));
+      .then((loadedDefaults) => {
+        const next = { ...emptyPayload, ...loadedDefaults };
+        setDefaults(next);
+        setForm(next);
+      })
+      .catch(() => setStatus({ kind: 'error', text: 'Setup-Standardwerte konnten nicht geladen werden.' }));
+    checkSetup().then((response) => setEnvExists(response.data.env_exists)).catch(() => setEnvExists(false));
   }, []);
 
   function setValue<K extends keyof SetupPayload>(key: K, value: SetupPayload[K]) {
@@ -65,10 +73,35 @@ export function SetupPage({ setPage }: Props) {
 
   async function checkKeyFile() {
     const result = await validateOpenAiKeyFile(form.openai_api_key_file);
-    setStatus({ kind: result.has_content ? 'success' : 'error', text: result.message });
+    setKeyStatus(result);
+    setStatus({ kind: result.non_empty ? 'success' : 'error', text: result.message });
+  }
+
+  function validateForm() {
+    const missing: string[] = [];
+    if (!form.klassenbuch_url.trim()) missing.push('Klassenbuch URL');
+    if (!form.timebutler_url.trim()) missing.push('Timebutler URL');
+    if (!form.klassenbuch_username.trim()) missing.push('Klassenbuch Benutzer');
+    if (!envExists && !form.klassenbuch_password.trim()) missing.push('Klassenbuch Passwort');
+    if (form.use_separate_timebutler_credentials && !form.timebutler_username.trim()) missing.push('Timebutler Benutzer');
+    if (!envExists && form.use_separate_timebutler_credentials && !form.timebutler_password.trim()) missing.push('Timebutler Passwort');
+    if (!/^\d{2}:\d{2}$/.test(form.timebutler_start) || !/^\d{2}:\d{2}$/.test(form.timebutler_end)) missing.push('Start/Ende im Format hh:mm');
+    if (missing.length) {
+      setStatus({ kind: 'error', text: `Bitte pruefen: ${missing.join(', ')}.` });
+      return false;
+    }
+    setStatus({ kind: 'success', text: 'Eingaben sehen vollstaendig aus.' });
+    return true;
+  }
+
+  function resetForm() {
+    setForm(defaults);
+    setKeyStatus(null);
+    setStatus({ kind: 'info', text: 'Setup-Formular wurde auf die geladenen Werte zurueckgesetzt.' });
   }
 
   async function submit() {
+    if (!validateForm()) return;
     setSaving(true);
     setStatus(null);
     try {
@@ -76,7 +109,7 @@ export function SetupPage({ setPage }: Props) {
       setStatus({ kind: response.ok ? 'success' : 'error', text: response.message });
       if (response.ok) setPage('dashboard');
     } catch (error) {
-      setStatus({ kind: 'error', text: String(error) });
+      setStatus({ kind: 'error', text: 'Setup konnte nicht gespeichert werden. Bitte Pflichtfelder und Zeitformat pruefen.' });
     } finally {
       setSaving(false);
     }
@@ -98,6 +131,12 @@ export function SetupPage({ setPage }: Props) {
           </button>
           <button className="primary" disabled={saving} onClick={submit}>
             <Save size={18} /> {saving ? 'Speichert...' : 'Setup speichern'}
+          </button>
+          <button className="secondary" onClick={validateForm}>
+            <ShieldCheck size={18} /> Eingaben pruefen
+          </button>
+          <button className="secondary" onClick={resetForm}>
+            <RotateCcw size={18} /> Zuruecksetzen
           </button>
         </div>
       </div>
@@ -153,10 +192,18 @@ export function SetupPage({ setPage }: Props) {
             API-Key-Datei
             <input value={form.openai_api_key_file} onChange={(event) => setValue('openai_api_key_file', event.target.value)} />
           </label>
+          {keyStatus && (
+            <div className="small-cards wide">
+              <div><span>Gefunden</span><strong>{keyStatus.exists ? 'Ja' : 'Nein'}</strong></div>
+              <div><span>Lesbar</span><strong>{keyStatus.readable ? 'Ja' : 'Nein'}</strong></div>
+              <div><span>Nicht leer</span><strong>{keyStatus.non_empty ? 'Ja' : 'Nein'}</strong></div>
+            </div>
+          )}
           <label className="field wide">
             API-Key direkt eintragen
             <input type={secretType} value={form.openai_api_key} placeholder="Optional, leer lassen = vorhandenen Wert behalten" onChange={(event) => setValue('openai_api_key', event.target.value)} />
           </label>
+          <p className="wide muted">Der API-Key wird niemals angezeigt, geloggt oder ins Repository uebernommen.</p>
           <label className="field">
             Modell
             <input value={form.openai_model} onChange={(event) => setValue('openai_model', event.target.value)} />
@@ -234,6 +281,7 @@ export function SetupPage({ setPage }: Props) {
             <input type="checkbox" checked={form.auto_submit} onChange={(event) => setValue('auto_submit', event.target.checked)} />
             Produktivaktionen erlauben
           </label>
+          {form.auto_submit && <div className="banner warning wide">Produktivaktionen bleiben zusaetzlich durch die finale Review gesperrt. Bitte nur aktivieren, wenn du wirklich speichern/signieren/absenden willst.</div>}
         </div>
       </section>
     </>
