@@ -24,14 +24,22 @@ pip install -r backend\requirements.txt
 if errorlevel 1 goto error
 python -m playwright install
 if errorlevel 1 goto error
+set "NPM_CMD=npm"
+set "PORTABLE_NODE_DIR="
+for /d %%D in ("%CD%\.tools\node-v*-win-x64") do set "PORTABLE_NODE_DIR=%%~fD"
 npm --version >nul 2>&1
 if errorlevel 1 (
-  echo Node.js/npm wurde nicht gefunden. Bitte Node.js installieren.
-  pause
-  exit /b 1
+  if defined PORTABLE_NODE_DIR (
+    set "PATH=%PORTABLE_NODE_DIR%;%PATH%"
+    set "NPM_CMD=%PORTABLE_NODE_DIR%\npm.cmd"
+  ) else (
+    echo Node.js/npm wurde nicht gefunden. Bitte Node.js installieren oder start_test.cmd zum automatischen Einrichten nutzen.
+    pause
+    exit /b 1
+  )
 )
 cd frontend
-npm install
+call "%NPM_CMD%" install
 if errorlevel 1 goto error
 cd ..
 echo Installation abgeschlossen.

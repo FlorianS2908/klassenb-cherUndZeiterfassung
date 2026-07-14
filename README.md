@@ -24,7 +24,7 @@ Die Weboberflaeche erzeugt lokal eine `.env`. Passwoerter und API-Keys werden ni
 
 Wenn `TIMEBUTLER_USERNAME` oder `TIMEBUTLER_PASSWORD` leer sind, nutzt das Backend automatisch die Klassenbuch-Zugangsdaten.
 
-Der alte Konsolen-Assistent `setup_env.py` bleibt nur als manueller Legacy-Fallback erhalten und wird nicht automatisch gestartet.
+`setup_env.py` startet keine Konsolenabfragen mehr. Das Skript gibt nur noch den Hinweis auf das Web-Setup unter [http://localhost:5173/setup](http://localhost:5173/setup) aus.
 
 ## Start
 

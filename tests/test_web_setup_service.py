@@ -153,3 +153,21 @@ def test_setup_run_does_not_start_console_process():
     assert response.status_code == 200
     assert response.json()["data"]["setup_url"] == "/setup"
     assert "Weboberflaeche" in response.json()["message"]
+
+
+def test_openai_key_file_endpoint_wraps_status_without_secret():
+    key_path = _env_path().with_name("api-endpoint.key")
+    key_path.write_text("sk-endpoint-secret", encoding="utf-8")
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    response = client.post("/api/setup/validate-openai-key-file", json={"openai_api_key_file": str(key_path)})
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["ok"] is True
+    assert body["data"]["exists"] is True
+    assert body["data"]["readable"] is True
+    assert body["data"]["non_empty"] is True
+    assert "sk-endpoint-secret" not in str(body)

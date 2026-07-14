@@ -121,8 +121,8 @@ export function SetupPage({ setPage }: Props) {
     <>
       <div className="page-head">
         <div>
-          <h1>Setup</h1>
-          <p>Zugangsdaten und lokale Pfade werden nur in der lokalen .env gespeichert.</p>
+          <h1>Einrichtung Klassenbuch & Zeiterfassung</h1>
+          <p>Die Zugangsdaten werden nur lokal in der .env gespeichert. Sie werden nicht angezeigt, nicht geloggt und nicht ins Repository uebernommen.</p>
         </div>
         <div className="actions compact">
           <button className="secondary" onClick={() => setShowSecrets((value) => !value)}>

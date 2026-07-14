@@ -26,7 +26,8 @@ def setup_defaults():
 
 @router.post("/validate-openai-key-file")
 def validate_key_file(payload: dict[str, str]):
-    return validate_openai_key_file(payload.get("openai_api_key_file") or payload.get("path", ""))
+    result = validate_openai_key_file(payload.get("openai_api_key_file") or payload.get("path", ""))
+    return ApiMessage(ok=result.exists and result.readable and result.non_empty, message=result.message, data=result.model_dump())
 
 
 @router.post("/save")

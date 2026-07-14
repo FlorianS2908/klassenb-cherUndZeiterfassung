@@ -9,11 +9,21 @@ from app.models.schemas import OpenAiKeyFileCheck, SetupCheckResult, SetupDefaul
 
 GITIGNORE_REQUIRED_LINES = [
     ".env",
+    "api_key_klassenbuch.txt",
     "api_key*.txt",
     "*.key",
     "*.secret",
     "secrets/",
     "credentials/",
+    "uploads/",
+    "screenshots/",
+    "logs/",
+    "error_reports/",
+    "analysis_history/",
+    "node_modules/",
+    ".venv/",
+    "dist/",
+    "__pycache__/",
 ]
 
 
