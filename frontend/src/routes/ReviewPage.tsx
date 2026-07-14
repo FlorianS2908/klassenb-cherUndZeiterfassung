@@ -25,6 +25,8 @@ export function ReviewPage({
   const [items, setItems] = useState<UeItem[]>(toUeItems(workflow.generatedEntries));
   const [reviewed, setReviewed] = useState(false);
   const [signatureConfirmed, setSignatureConfirmed] = useState(false);
+  const [signaturePrepared, setSignaturePrepared] = useState(false);
+  const [signatureScreenshot, setSignatureScreenshot] = useState('');
   const [autoSubmit, setAutoSubmit] = useState(false);
   const [message, setMessage] = useState('');
   const ready = Boolean(workflow.selectedClassbook && workflow.analysisDone && workflow.generatedEntries.length === 9);
@@ -59,11 +61,14 @@ export function ReviewPage({
     setMessage('Signatur wird vorbereitet ...');
     const result = await prepareKlassenbuchSignature(payload, reviewed);
     setWorkflow({ generatedEntries: normalizeEntries(items), reviewDone: true });
+    setSignaturePrepared(Boolean((result as { ok?: boolean }).ok));
+    const data = (result as { data?: { screenshot?: string } }).data;
+    setSignatureScreenshot(data?.screenshot || '');
     setMessage(JSON.stringify(result, null, 2));
   }
 
   async function finalizeSignature() {
-    if (!workflow.selectedClassbook || items.length !== 9 || !reviewed || !signatureConfirmed || !autoSubmit) return;
+    if (!workflow.selectedClassbook || items.length !== 9 || !reviewed || !signaturePrepared || !signatureConfirmed || !autoSubmit) return;
     setMessage('Finale Signatur wird ausgefuehrt ...');
     const result = await submitKlassenbuch(payload, reviewed, signatureConfirmed);
     setWorkflow({ generatedEntries: normalizeEntries(items), reviewDone: Boolean((result as { ok?: boolean }).ok), currentStep: 'submit_done' });
@@ -101,14 +106,16 @@ export function ReviewPage({
         </label>
         <label className="check-row">
           <input type="checkbox" checked={signatureConfirmed} onChange={(event) => setSignatureConfirmed(event.target.checked)} />
-          Ich bestaetige, dass die Signatur gesetzt und final verwendet werden darf.
+          Ich bestaetige, dass diese Signatur final verwendet werden darf.
         </label>
+        {signaturePrepared && <div className="banner info">Signatur wurde in das Klassenbuch-Canvas eingetragen.</div>}
+        {signatureScreenshot && <div className="banner info">Screenshot nach Signatur: {signatureScreenshot}</div>}
         {!autoSubmit && <div className="banner warning">Final signieren ist deaktiviert, weil AUTO_SUBMIT nicht aktiv ist.</div>}
         <div className="actions">
           <button className="secondary" onClick={() => setPage('analysis')}>Zurueck zur Analyse</button>
           <button className="secondary" disabled={!reviewed || items.length !== 9} onClick={prepareReview}>Klassenbuch vorbereiten</button>
           <button className="secondary" disabled={!reviewed || items.length !== 9} onClick={prepareSignature}>Signatur vorbereiten</button>
-          <button className="primary" disabled={!reviewed || !signatureConfirmed || !autoSubmit || items.length !== 9} onClick={finalizeSignature}>Final signieren</button>
+          <button className="primary" disabled={!reviewed || !signaturePrepared || !signatureConfirmed || !autoSubmit || items.length !== 9} onClick={finalizeSignature}>Final signieren</button>
         </div>
         {message && <pre className="output">{message}</pre>}
       </section>

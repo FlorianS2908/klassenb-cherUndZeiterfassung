@@ -17,6 +17,7 @@ from app.models.schemas import ApiMessage
 from app.services.credentials_service import get_klassenbuch_credentials
 from app.services.diagnostics_service import append_console_message, append_network_event, categorize_problem, create_diagnostic_run, explain_exception, save_step_snapshot, write_steps, write_summary
 from app.services.screenshot_service import save_page_screenshot, screenshot_name
+from app.services.signature_profile_service import read_signature_profile
 from app.services.status_service import status_service
 
 
@@ -1401,6 +1402,109 @@ async def _draw_signature_direct_canvas(canvas) -> bool:
     return await _canvas_has_ink(canvas)
 
 
+async def _load_saved_signature_profile() -> dict:
+    profile = read_signature_profile()
+    if not profile:
+        return {}
+    return profile
+
+
+def _signature_profile_diagnostics(profile: dict) -> dict[str, Any]:
+    strokes = profile.get("strokes") if isinstance(profile.get("strokes"), list) else []
+    return {
+        "stroke_count": len(strokes),
+        "point_count": sum(len(stroke) for stroke in strokes if isinstance(stroke, list)),
+        "has_preview": bool(profile.get("preview_png_data_url")),
+        "source": profile.get("source", "local_signature_pad"),
+    }
+
+
+def _signature_strokes(profile: dict) -> list[list[dict[str, Any]]]:
+    strokes = profile.get("strokes")
+    if not isinstance(strokes, list):
+        return []
+    normalized: list[list[dict[str, Any]]] = []
+    for stroke in strokes:
+        if not isinstance(stroke, list):
+            continue
+        points = []
+        for point in stroke:
+            if not isinstance(point, dict):
+                continue
+            try:
+                points.append({"x": max(0.0, min(1.0, float(point.get("x", 0)))), "y": max(0.0, min(1.0, float(point.get("y", 0))))})
+            except Exception:
+                continue
+        if points:
+            normalized.append(points)
+    return normalized
+
+
+async def _draw_saved_signature_with_mouse(page, canvas, profile: dict) -> bool:
+    box = await canvas.bounding_box()
+    if not box or box["width"] < 80 or box["height"] < 30:
+        raise RuntimeError("Signatur-Zeichenflaeche hat keine plausible Groesse.")
+    strokes = _signature_strokes(profile)
+    if not strokes:
+        return False
+    await _safe_screenshot(page, "signature_mouse_draw_started")
+    for stroke in strokes:
+        first = stroke[0]
+        start_x = box["x"] + first["x"] * box["width"]
+        start_y = box["y"] + first["y"] * box["height"]
+        await page.mouse.move(start_x, start_y)
+        await page.mouse.down()
+        for point in stroke[1:]:
+            x = box["x"] + point["x"] * box["width"]
+            y = box["y"] + point["y"] * box["height"]
+            x = max(box["x"], min(box["x"] + box["width"], x))
+            y = max(box["y"], min(box["y"] + box["height"], y))
+            await page.mouse.move(x, y, steps=2)
+        await page.mouse.up()
+    await _notify_signature_pad_changed(page, canvas)
+    await _safe_screenshot(page, "signature_mouse_draw_done")
+    return await _canvas_has_ink(canvas)
+
+
+async def _draw_saved_signature_direct_canvas(page, canvas, profile: dict) -> bool:
+    strokes = _signature_strokes(profile)
+    if not strokes:
+        return False
+    try:
+        await canvas.evaluate(
+            """(node, strokes) => {
+                const ctx = node.getContext && node.getContext("2d");
+                if (!ctx) return;
+                const w = node.width || node.getBoundingClientRect().width;
+                const h = node.height || node.getBoundingClientRect().height;
+                ctx.save();
+                ctx.strokeStyle = "#111";
+                ctx.lineWidth = Math.max(2, Math.round(Math.min(w, h) / 90));
+                ctx.lineCap = "round";
+                ctx.lineJoin = "round";
+                for (const stroke of strokes) {
+                    if (!stroke.length) continue;
+                    ctx.beginPath();
+                    ctx.moveTo(Math.max(0, Math.min(1, stroke[0].x)) * w, Math.max(0, Math.min(1, stroke[0].y)) * h);
+                    for (const point of stroke.slice(1)) {
+                        ctx.lineTo(Math.max(0, Math.min(1, point.x)) * w, Math.max(0, Math.min(1, point.y)) * h);
+                    }
+                    ctx.stroke();
+                }
+                ctx.restore();
+                node.dispatchEvent(new Event("input", { bubbles: true }));
+                node.dispatchEvent(new Event("change", { bubbles: true }));
+                node.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+                try { node.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, pointerType: "mouse" })); } catch (_) {}
+            }""",
+            strokes,
+        )
+    except Exception:
+        return False
+    await _notify_signature_pad_changed(page, canvas)
+    return await _canvas_has_ink(canvas)
+
+
 async def draw_signature_schaffer(page, canvas_locator=None) -> None:
     canvas = canvas_locator or await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature_canvas"])
     if canvas is None:
@@ -1427,10 +1531,25 @@ async def _fill_signature(page, allow_overwrite: bool, draw_canvas: bool = True,
         canvas = await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature_canvas"])
         if canvas is not None:
             _set_signature_step(StepState.running, "Signatur-Zeichenflaeche gefunden.")
-            await _diag_step(page, diag, "signatur_canvas_detected", await _canvas_debug_info(canvas))
-            await draw_signature_schaffer(page, canvas)
+            await _diag_step(page, diag, "signature_canvas_detected", await _canvas_debug_info(canvas))
+            profile = await _load_saved_signature_profile()
+            if profile:
+                profile_diag = _signature_profile_diagnostics(profile)
+                await _diag_step(page, diag, "signature_profile_loaded", profile_diag)
+                _set_signature_step(StepState.running, "Lokale Signatur wird gezeichnet.")
+                mouse_has_ink = await _draw_saved_signature_with_mouse(page, canvas, profile)
+                await _diag_step(page, diag, "signature_mouse_draw_done", {**profile_diag, "canvas_has_ink": mouse_has_ink})
+                if not mouse_has_ink:
+                    await _safe_screenshot(page, "signature_direct_canvas_fallback")
+                    direct_has_ink = await _draw_saved_signature_direct_canvas(page, canvas, profile)
+                    await _diag_step(page, diag, "signature_direct_canvas_fallback", {**profile_diag, "canvas_has_ink": direct_has_ink})
+                    if not direct_has_ink:
+                        raise RuntimeError("Lokale Signatur konnte nicht in das Canvas gezeichnet werden.")
+            else:
+                await _diag_step(page, diag, "signature_profile_missing", {"stroke_count": 0, "point_count": 0})
+                await draw_signature_schaffer(page, canvas)
             debug_info = await _canvas_debug_info(canvas)
-            await _diag_step(page, diag, "signatur_canvas_has_ink", debug_info)
+            await _diag_step(page, diag, "signature_canvas_has_ink", debug_info)
             return debug_info
     settings = get_settings()
     locator = await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature"])

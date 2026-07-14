@@ -13,6 +13,7 @@ import { SetupPage } from './routes/SetupPage';
 import { TimebutlerPage } from './routes/TimebutlerPage';
 import { NotFoundPage } from './routes/NotFoundPage';
 import { FileAnalysisPage } from './routes/FileAnalysisPage';
+import { SignatureSettingsPage } from './routes/SignatureSettingsPage';
 import { checkSetup } from './services/setupService';
 import { useWorkflowState } from './state/workflowState';
 
@@ -26,6 +27,7 @@ const pagePaths: Record<string, string> = {
   screenshots: '/screenshots',
   logs: '/logs',
   settings: '/settings',
+  signature: '/signature',
   setup: '/setup',
   'not-found': window.location.pathname,
 };
@@ -43,6 +45,7 @@ function pageFromPath(pathname: string) {
     '/screenshots': 'screenshots',
     '/logs': 'logs',
     '/settings': 'settings',
+    '/signature': 'signature',
   };
   return routes[normalized] ?? 'not-found';
 }
@@ -83,6 +86,7 @@ export default function App() {
     screenshots: <ScreenshotsPage />,
     logs: <LogsPage />,
     settings: <SettingsPage setPage={setPage} />,
+    signature: <SignatureSettingsPage setPage={setPage} />,
     setup: <SetupPage setPage={setPage} />,
     'not-found': <NotFoundPage setPage={setPage} />,
   };

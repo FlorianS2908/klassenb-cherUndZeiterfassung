@@ -76,6 +76,7 @@ export function Layout({
               <div className="gear-dropdown">
                 <button onClick={() => setPage('dashboard')}>Status</button>
                 <button onClick={() => setPage('settings')}>Einstellungen</button>
+                <button onClick={() => setPage('signature')}>Signatur verwalten</button>
                 <button onClick={() => setPage('klassenbuch')}>Diagnose</button>
                 <button onClick={resetWorkflow}>Workflow zuruecksetzen</button>
                 <button onClick={() => setPage('timebutler')}><Wrench size={16} /> Erweiterte Tools</button>

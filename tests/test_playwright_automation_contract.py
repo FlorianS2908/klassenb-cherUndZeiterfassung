@@ -4,7 +4,7 @@ import inspect
 import asyncio
 
 from app.browser import automation_klassenbuch
-from app.browser.automation_klassenbuch import _canvas_has_ink, _extract_edit_action_index, _fill_signature, _interpolate_points, _normalize_table_key, _row_to_entry, _signature_points, _validate_signature_submit_allowed
+from app.browser.automation_klassenbuch import _canvas_has_ink, _draw_saved_signature_with_mouse, _extract_edit_action_index, _fill_signature, _interpolate_points, _normalize_table_key, _row_to_entry, _signature_points, _validate_signature_submit_allowed
 from app.browser.base import first_locator
 from app.browser.selectors_timebutler import TIMEBUTLER_SELECTORS
 from app.config import get_settings
@@ -158,6 +158,55 @@ def test_draw_signature_schaffer_uses_direct_canvas_only_after_mouse_failure(mon
 
     assert page.mouse.moves
     assert calls == ["direct"]
+
+
+def test_draw_saved_signature_with_mouse_uses_saved_strokes(monkeypatch):
+    page = PageMock()
+    canvas = CanvasBoxMock(True)
+    profile = {"strokes": [[{"x": 0.1, "y": 0.5}, {"x": 0.5, "y": 0.6}, {"x": 0.9, "y": 0.5}]]}
+
+    async def fake_safe_screenshot(page_arg, step):
+        return step
+
+    monkeypatch.setattr(automation_klassenbuch, "_safe_screenshot", fake_safe_screenshot)
+
+    assert asyncio.run(_draw_saved_signature_with_mouse(page, canvas, profile)) is True
+    assert len(page.mouse.moves) >= 3
+    assert all(10 <= move[0] <= 610 for move in page.mouse.moves)
+
+
+def test_fill_signature_uses_direct_fallback_only_when_saved_mouse_fails(monkeypatch):
+    calls = []
+    canvas = CanvasBoxMock(False)
+
+    async def fake_locator_or_none(page, selectors):
+        return canvas
+
+    async def fake_profile():
+        return {"strokes": [[{"x": 0.2, "y": 0.5}, {"x": 0.8, "y": 0.5}]]}
+
+    async def fake_mouse(page, canvas_arg, profile):
+        calls.append("mouse")
+        return False
+
+    async def fake_direct(page, canvas_arg, profile):
+        calls.append("direct")
+        canvas_arg.has_ink = True
+        return True
+
+    async def fake_safe_screenshot(page, step):
+        return step
+
+    monkeypatch.setattr(automation_klassenbuch, "_locator_or_none", fake_locator_or_none)
+    monkeypatch.setattr(automation_klassenbuch, "_load_saved_signature_profile", fake_profile)
+    monkeypatch.setattr(automation_klassenbuch, "_draw_saved_signature_with_mouse", fake_mouse)
+    monkeypatch.setattr(automation_klassenbuch, "_draw_saved_signature_direct_canvas", fake_direct)
+    monkeypatch.setattr(automation_klassenbuch, "_safe_screenshot", fake_safe_screenshot)
+
+    result = asyncio.run(_fill_signature(PageMock(), allow_overwrite=True))
+
+    assert calls == ["mouse", "direct"]
+    assert result["canvas_has_ink"] is True
 
 
 def test_fill_signature_aborts_without_canvas_or_signature_field(monkeypatch):

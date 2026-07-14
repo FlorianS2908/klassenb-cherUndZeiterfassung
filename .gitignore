@@ -1,5 +1,9 @@
 .env
 *.env
+runtime/
+runtime/secrets/
+runtime/secrets/signature.profile.json
+*.signature.json
 __pycache__/
 .venv/
 .tools/
@@ -40,3 +44,4 @@ start_test.log
 !runtime/
 !runtime/secrets/
 !runtime/secrets/klassenbuch.credentials.example.json
+!runtime/secrets/signature.profile.example.json

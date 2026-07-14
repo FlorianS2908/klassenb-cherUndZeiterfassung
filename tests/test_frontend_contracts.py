@@ -59,6 +59,8 @@ def test_guided_klassenbuch_workflow_contracts():
     klassenbuch = (ROOT / "frontend" / "src" / "routes" / "KlassenbuchPage.tsx").read_text(encoding="utf-8")
     analysis = (ROOT / "frontend" / "src" / "routes" / "FileAnalysisPage.tsx").read_text(encoding="utf-8")
     review = (ROOT / "frontend" / "src" / "routes" / "ReviewPage.tsx").read_text(encoding="utf-8")
+    signature = (ROOT / "frontend" / "src" / "routes" / "SignatureSettingsPage.tsx").read_text(encoding="utf-8")
+    signature_service = (ROOT / "frontend" / "src" / "services" / "signatureService.ts").read_text(encoding="utf-8")
 
     assert "'/analysis': 'analysis'" in app
     assert "FileAnalysisPage" in app
@@ -85,11 +87,19 @@ def test_guided_klassenbuch_workflow_contracts():
     assert "normalizeEntries" in analysis
     assert "Review noch nicht verfuegbar" in review
     assert "Ich habe die 9 UE geprueft" in review
-    assert "Ich bestaetige, dass die Signatur gesetzt und final verwendet werden darf" in review
+    assert "Ich bestaetige, dass diese Signatur final verwendet werden darf" in review
     assert "Klassenbuch vorbereiten" in review
     assert "Signatur vorbereiten" in review
     assert "Final signieren" in review
     assert "prepareKlassenbuchSignature" in review
     assert "submitKlassenbuch" in review
     assert "!autoSubmit" in review
+    assert "signaturePrepared" in review
+    assert "Signatur wurde in das Klassenbuch-Canvas eingetragen" in review
     assert "prepareKlassenbuch" in review
+    assert "Signatur verwalten" in signature
+    assert "onPointerDown" in signature
+    assert "Signatur lokal speichern" in signature
+    assert "Gespeicherte Signatur testen" in signature
+    assert "preview_png_data_url" in signature_service
+    assert "/api/signature/save" in signature_service

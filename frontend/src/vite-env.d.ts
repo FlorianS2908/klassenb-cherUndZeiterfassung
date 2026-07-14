@@ -6,6 +6,7 @@ declare namespace JSX {
 
 declare namespace React {
   type ReactNode = any;
+  type PointerEvent<T = any> = any;
 }
 
 declare module '*.css' {
@@ -17,6 +18,7 @@ declare module 'react' {
   export type ReactNode = any;
   export const StrictMode: any;
   export function useEffect(effect: () => void | (() => void), deps?: any[]): void;
+  export function useRef<T>(initial: T): { current: T };
   export function useState<T>(initial: T): [T, (value: T | ((previous: T) => T)) => void];
 }
 

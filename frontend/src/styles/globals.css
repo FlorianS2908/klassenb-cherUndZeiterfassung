@@ -25,6 +25,8 @@ button { border: 0; cursor: pointer; }
 body.dark { background: #101820; color: #e9eef4; }
 body.dark .panel, body.dark .status-card, body.dark .ue-card, body.dark .gear-dropdown { background: #17202a; color: #e9eef4; border-color: #32465a; }
 body.dark p, body.dark .muted { color: #b7c4d1; }
+.signature-pad { width: 100%; max-width: 700px; aspect-ratio: 700 / 260; border: 1px solid #ccd7e2; border-radius: 8px; background: #fff; touch-action: none; display: block; }
+.signature-preview { width: 100%; max-width: 420px; border: 1px solid #dbe5ef; border-radius: 8px; background: #fff; margin-top: 16px; }
 .page-head { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
 h1 { margin: 0; font-size: 32px; }
 h2 { margin-top: 0; font-size: 20px; }
