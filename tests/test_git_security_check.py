@@ -19,3 +19,20 @@ def test_gitignore_contains_api_key_patterns():
     lines = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "api_key*.txt" in lines
     assert "*.secret" in lines
+
+
+def test_gitignore_contains_local_credential_patterns():
+    lines = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "runtime/*" in lines
+    assert "runtime/secrets/klassenbuch.credentials.json" in lines
+    assert "*.credentials.json" in lines
+    assert "*.secret.json" in lines
+    assert "!runtime/secrets/klassenbuch.credentials.example.json" in lines
+
+
+def test_example_credentials_file_contains_no_real_secret():
+    content = (ROOT / "runtime" / "secrets" / "klassenbuch.credentials.example.json").read_text(encoding="utf-8")
+    assert "name@example.com" in content
+    assert "NICHT_ECHT" in content
+    assert "Florian.Schaffer" not in content
+    assert "florian.schaffer" not in content.lower()

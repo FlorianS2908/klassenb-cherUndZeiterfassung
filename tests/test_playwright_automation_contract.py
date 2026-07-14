@@ -116,9 +116,11 @@ def test_first_locator_uses_nth_zero():
 
 def test_login_uses_credentials_service_instead_of_settings_password():
     source = inspect.getsource(automation_klassenbuch._login)
+    overview_source = inspect.getsource(automation_klassenbuch.load_klassenbuecher_overview)
 
     assert "get_klassenbuch_credentials()" in source
     assert "settings.klassenbuch_password" not in source
+    assert "await _login(page, diag)" in overview_source
 
 
 def test_save_html_snapshot_masks_password_values(monkeypatch):

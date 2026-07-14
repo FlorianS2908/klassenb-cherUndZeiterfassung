@@ -1,7 +1,7 @@
 import { Eye, EyeOff, KeyRound, RotateCcw, Save, ShieldCheck, TestTube2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { OpenAiKeyFileCheck, SetupPayload } from '../types';
-import { checkSetup, getSetupDefaults, saveSetup, testKlassenbuchLogin, validateOpenAiKeyFile } from '../services/setupService';
+import { checkSetup, getSetupDefaults, saveLocalKlassenbuchCredentials, saveSetup, testKlassenbuchLogin, testKlassenbuchLoginWithCredentials, validateOpenAiKeyFile } from '../services/setupService';
 
 const emptyPayload: SetupPayload = {
   klassenbuch_url: '',
@@ -9,6 +9,8 @@ const emptyPayload: SetupPayload = {
   klassenbuch_username: '',
   klassenbuch_password_present: false,
   klassenbuch_password_source: 'missing',
+  klassenbuch_credentials_file_exists: false,
+  klassenbuch_credentials_file_path: 'runtime/secrets/klassenbuch.credentials.json',
   klassenbuch_password: '',
   timebutler_username: '',
   timebutler_password_present: false,
@@ -63,6 +65,7 @@ export function SetupPage({ setPage }: Props) {
   const [showSecrets, setShowSecrets] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testingLogin, setTestingLogin] = useState(false);
+  const [savingLocalCredentials, setSavingLocalCredentials] = useState(false);
 
   useEffect(() => {
     getSetupDefaults()
@@ -140,12 +143,39 @@ export function SetupPage({ setPage }: Props) {
     setTestingLogin(true);
     setStatus(null);
     try {
-      const response = await testKlassenbuchLogin();
+      const response = form.klassenbuch_password
+        ? await testKlassenbuchLoginWithCredentials(form.klassenbuch_username, form.klassenbuch_password)
+        : await testKlassenbuchLogin();
       setStatus({ kind: response.ok ? 'success' : 'error', text: response.message });
     } catch (error) {
       setStatus({ kind: 'error', text: 'Login fehlgeschlagen. Bitte Benutzername und Passwort neu eingeben.' });
     } finally {
       setTestingLogin(false);
+    }
+  }
+
+  async function saveLocalCredentials() {
+    if (!form.klassenbuch_username.trim() || !form.klassenbuch_password) {
+      setStatus({ kind: 'error', text: 'Bitte Klassenbuch-Benutzer und Passwort eingeben.' });
+      return;
+    }
+    setSavingLocalCredentials(true);
+    setStatus(null);
+    try {
+      const response = await saveLocalKlassenbuchCredentials(form.klassenbuch_username, form.klassenbuch_password);
+      const data = response.data as Partial<SetupPayload>;
+      setForm((current) => ({
+        ...current,
+        ...data,
+        klassenbuch_password: '',
+        klassenbuch_password_present: true,
+        klassenbuch_password_source: 'local_file',
+      }));
+      setStatus({ kind: 'success', text: 'Zugangsdaten lokal gespeichert.' });
+    } catch (error) {
+      setStatus({ kind: 'error', text: 'Zugangsdaten konnten nicht lokal gespeichert werden.' });
+    } finally {
+      setSavingLocalCredentials(false);
     }
   }
 
@@ -195,10 +225,17 @@ export function SetupPage({ setPage }: Props) {
           <p className="wide muted">Das Passwort wird bevorzugt im Windows Credential Manager gespeichert. Es wird nicht im Code und nicht im Repository abgelegt.</p>
           <div className="small-cards wide">
             <div><span>Klassenbuch Passwort gespeichert</span><strong>{form.klassenbuch_password_present ? 'Ja' : 'Nein'}</strong></div>
-            <div><span>Speicherort</span><strong>{form.klassenbuch_password_source === 'keyring' ? 'Windows Credential Manager' : form.klassenbuch_password_source === 'env' ? '.env Fallback' : 'Fehlt'}</strong></div>
+            <div><span>Quelle</span><strong>{form.klassenbuch_password_source === 'local_file' ? 'local_file' : form.klassenbuch_password_source === 'keyring' ? 'keyring' : form.klassenbuch_password_source === 'env' ? 'env' : 'missing'}</strong></div>
+            <div><span>Benutzer vorhanden</span><strong>{form.klassenbuch_username.trim() ? 'Ja' : 'Nein'}</strong></div>
+            <div><span>Passwort vorhanden</span><strong>{form.klassenbuch_password_present ? 'Ja' : 'Nein'}</strong></div>
+            <div><span>Credential-Datei</span><strong>{form.klassenbuch_credentials_file_exists ? 'Ja' : 'Nein'}</strong></div>
           </div>
+          <p className="wide muted">Lokale Datei: {form.klassenbuch_credentials_file_path ?? 'runtime/secrets/klassenbuch.credentials.json'}</p>
           <div className="actions wide">
-            <button className="secondary" onClick={runKlassenbuchLoginTest} disabled={testingLogin || !form.klassenbuch_password_present}>
+            <button className="secondary" onClick={saveLocalCredentials} disabled={savingLocalCredentials}>
+              <Save size={18} /> {savingLocalCredentials ? 'Speichert lokal...' : 'Klassenbuch-Zugangsdaten lokal speichern'}
+            </button>
+            <button className="secondary" onClick={runKlassenbuchLoginTest} disabled={testingLogin || (!form.klassenbuch_password_present && !form.klassenbuch_password)}>
               <TestTube2 size={18} /> {testingLogin ? 'Test laeuft...' : 'Klassenbuch-Login testen'}
             </button>
           </div>

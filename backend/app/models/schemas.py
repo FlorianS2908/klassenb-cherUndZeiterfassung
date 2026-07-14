@@ -119,6 +119,8 @@ class SetupDefaults(BaseModel):
     klassenbuch_username: str = ""
     klassenbuch_password_present: bool = False
     klassenbuch_password_source: str = "missing"
+    klassenbuch_credentials_file_exists: bool = False
+    klassenbuch_credentials_file_path: str = "runtime/secrets/klassenbuch.credentials.json"
     timebutler_username: str = ""
     timebutler_password_present: bool = False
     timebutler_password_source: str = "missing"

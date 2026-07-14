@@ -8,7 +8,11 @@ dist/
 logs/
 screenshots/
 diagnostics/
-runtime/
+runtime/*
+!runtime/secrets/
+runtime/secrets/*
+runtime/secrets/klassenbuch.credentials.json
+!runtime/secrets/klassenbuch.credentials.example.json
 error_reports/
 uploads/
 analysis_history/
@@ -20,6 +24,8 @@ api_key_klassenbuch.txt
 api_key*.txt
 *.key
 *.secret
+*.credentials.json
+*.secret.json
 *.storage_state.json
 klassenbuch_storage_state.json
 secrets/
@@ -31,3 +37,6 @@ pytest-cache-files-*/
 .mypy_cache/
 start_test.log
 .tools/logs/
+!runtime/
+!runtime/secrets/
+!runtime/secrets/klassenbuch.credentials.example.json

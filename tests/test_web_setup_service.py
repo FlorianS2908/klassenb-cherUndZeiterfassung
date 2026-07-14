@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app import config
 from app.api.routes_setup import router
+from app.services import credentials_service
 from app.models.schemas import SetupPayload
 from app.services import setup_service
 
@@ -195,3 +196,26 @@ def test_openai_key_file_endpoint_wraps_status_without_secret():
     assert body["data"]["readable"] is True
     assert body["data"]["non_empty"] is True
     assert "sk-endpoint-secret" not in str(body)
+
+
+def test_save_local_klassenbuch_credentials_writes_file_without_returning_password(monkeypatch):
+    workspace = ROOT / ".tools" / "test_env" / uuid4().hex
+    monkeypatch.setattr(credentials_service, "resolve_project_path", lambda value: workspace / value)
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    try:
+        response = client.post("/api/setup/save-local-klassenbuch-credentials", json={"username": "trainer@example.com", "password": "local-secret"})
+        body = response.json()
+        credentials_file = workspace / "runtime" / "secrets" / "klassenbuch.credentials.json"
+
+        assert response.status_code == 200
+        assert credentials_file.exists()
+        assert body["data"]["source"] == "local_file"
+        assert body["data"]["password_present"] is True
+        assert "local-secret" not in str(body)
+    finally:
+        import shutil
+
+        shutil.rmtree(workspace, ignore_errors=True)

@@ -6,7 +6,7 @@ from dotenv import dotenv_values
 
 from app.config import ENV_PATH, ROOT_DIR, get_settings, resolve_project_path
 from app.models.schemas import OpenAiKeyFileCheck, SetupCheckResult, SetupDefaults, SetupPayload
-from app.services.credentials_service import KLASSENBUCH_SERVICE, TIMEBUTLER_SERVICE
+from app.services.credentials_service import KLASSENBUCH_SERVICE, TIMEBUTLER_SERVICE, get_klassenbuch_credential_status
 from app.services.secret_store import SecretStoreUnavailable, has_secret, set_secret
 
 GITIGNORE_REQUIRED_LINES = [
@@ -16,6 +16,11 @@ GITIGNORE_REQUIRED_LINES = [
     "api_key*.txt",
     "*.key",
     "*.secret",
+    "*.credentials.json",
+    "*.secret.json",
+    "runtime/*",
+    "runtime/secrets/*",
+    "!runtime/secrets/klassenbuch.credentials.example.json",
     "secrets/",
     "credentials/",
     "uploads/",
@@ -113,6 +118,12 @@ def _missing_from_env(values: dict[str, str]) -> list[str]:
 
 
 def _has_password(values: dict[str, str], prefix: str, service: str) -> bool:
+    if prefix == "KLASSENBUCH":
+        try:
+            if get_klassenbuch_credential_status()["source"] == "local_file":
+                return True
+        except Exception:
+            pass
     username = values.get(f"{prefix}_USERNAME", "").strip()
     if values.get(f"{prefix}_PASSWORD", "").strip():
         return True
@@ -231,12 +242,22 @@ def check_setup() -> SetupCheckResult:
         messages.append("Pflichtwerte fehlen: " + ", ".join(missing))
     else:
         messages.append("Setup vollstaendig.")
+    config_public = get_settings().public_dict()
+    credential_status = get_klassenbuch_credential_status()
+    config_public["credentials"] = {
+        **dict(config_public.get("credentials", {})),
+        "klassenbuch_username_present": credential_status["username_present"],
+        "klassenbuch_password_present": credential_status["password_present"],
+        "klassenbuch_password_source": credential_status["source"],
+        "klassenbuch_credentials_file_exists": credential_status["credentials_file_exists"],
+        "klassenbuch_credentials_file_path": credential_status["credentials_file_path"],
+    }
     return SetupCheckResult(
         env_exists=ENV_PATH.exists(),
         setup_required=bool(missing),
         missing=missing,
         messages=messages,
-        config_public=get_settings().public_dict(),
+        config_public=config_public,
     )
 
 

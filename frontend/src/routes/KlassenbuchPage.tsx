@@ -151,7 +151,7 @@ export function KlassenbuchPage() {
 
   async function loadOpenBooks() {
     setLoadingBooks(true);
-    setWebRunMessage('');
+    setWebRunMessage('Klassenbuecher werden geladen. Login laeuft im Hintergrund ...');
     try {
       const result = await getOpenKlassenbuecher();
       setOpenBooks(result.items);
@@ -161,11 +161,17 @@ export function KlassenbuchPage() {
       setWebRunMessage(`${result.count ?? result.items.length} Klassenbuecher geladen.`);
     } catch (error) {
       const parsedError = klassenbuchError(error);
+      const lowerMessage = parsedError.message.toLowerCase();
+      const friendlyMessage = lowerMessage.includes('zugangsdaten fehlen')
+        ? 'Klassenbuch-Zugangsdaten fehlen. Bitte Setup oeffnen oder lokale Credential-Datei anlegen.'
+        : lowerMessage.includes('login fehlgeschlagen')
+          ? 'Login fehlgeschlagen. Die lokal gespeicherten Zugangsdaten wurden abgelehnt.'
+          : parsedError.message;
       setOpenBooks([]);
       setBookGroups(groupKlassenbuecher([]));
       setBookDiagnostics(parsedError.diagnostics);
       setLatestDiagnostics(parsedError.diagnostics);
-      setWebRunMessage(`Klassenbuecher konnten nicht geladen werden: ${parsedError.message}`);
+      setWebRunMessage(`Klassenbuecher konnten nicht geladen werden: ${friendlyMessage}`);
     } finally {
       setLoadingBooks(false);
     }
@@ -263,7 +269,7 @@ export function KlassenbuchPage() {
         <div className="page-head">
           <h2>Klassenbuecher</h2>
           <div className="actions">
-            <button className="secondary" onClick={loadOpenBooks} disabled={loadingBooks}>{loadingBooks ? 'Laedt...' : 'Klassenbuecher laden'}</button>
+            <button className="secondary" onClick={loadOpenBooks} disabled={loadingBooks}>{loadingBooks ? 'Login laeuft ...' : 'Klassenbuecher laden'}</button>
             <button className="secondary" onClick={openLatestDiagnostics}>Letzte Diagnose oeffnen</button>
             <button className="secondary" onClick={runBrowserHealth}>Browser-Check</button>
           </div>

@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import json
+import shutil
+from pathlib import Path
+from uuid import uuid4
+
 import pytest
 
 from app import config
 from app.config import Settings
 from app.services import credentials_service, secret_store
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeKeyring:
@@ -39,6 +46,28 @@ def test_credentials_service_reads_klassenbuch_password_from_keyring(monkeypatch
     monkeypatch.setattr(credentials_service, "get_secret", lambda service, username: "secret-one")
 
     assert credentials_service.get_klassenbuch_credentials() == ("trainer@example.com", "secret-one")
+
+
+def test_credentials_service_reads_local_file_before_keyring_and_env(monkeypatch):
+    workspace = ROOT / ".tools" / "test_env" / uuid4().hex
+    credentials_file = workspace / "runtime" / "secrets" / "klassenbuch.credentials.json"
+    credentials_file.parent.mkdir(parents=True)
+    credentials_file.write_text(json.dumps({"username": "local@example.com", "password": "local-secret"}), encoding="utf-8")
+    try:
+        monkeypatch.setattr(credentials_service, "resolve_project_path", lambda value: workspace / value)
+        monkeypatch.setattr(
+            credentials_service,
+            "get_settings",
+            lambda: Settings(klassenbuch_username="env@example.com", klassenbuch_password="env-secret", klassenbuch_password_source="keyring"),
+        )
+        monkeypatch.setattr(credentials_service, "get_secret", lambda service, username: "keyring-secret")
+
+        assert credentials_service.get_klassenbuch_credentials() == ("local@example.com", "local-secret")
+        status = credentials_service.get_klassenbuch_credential_status()
+        assert status["source"] == "local_file"
+        assert status["password_present"] is True
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
 
 
 def test_credentials_service_falls_back_to_env_password(monkeypatch):

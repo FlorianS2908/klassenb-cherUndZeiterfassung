@@ -133,6 +133,8 @@ export interface SetupDefaults {
   klassenbuch_username: string;
   klassenbuch_password_present: boolean;
   klassenbuch_password_source: string;
+  klassenbuch_credentials_file_exists?: boolean;
+  klassenbuch_credentials_file_path?: string;
   timebutler_username: string;
   timebutler_password_present: boolean;
   timebutler_password_source: string;

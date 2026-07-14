@@ -354,9 +354,9 @@ async def _wait_for_login_result(page) -> bool:
     return await _is_any_visible(page, KLASSENBUCH_SELECTORS["overview_url_marker"])
 
 
-async def _login(page, diag: KlassenbuchDiagnosticsRun | None = None) -> None:
+async def _login(page, diag: KlassenbuchDiagnosticsRun | None = None, credentials: tuple[str, str] | None = None) -> None:
     settings = get_settings()
-    username, password = get_klassenbuch_credentials()
+    username, password = credentials or get_klassenbuch_credentials()
     try:
         if _storage_state_path().exists():
             await page.goto(_overview_url(), wait_until="domcontentloaded")
@@ -410,6 +410,23 @@ async def _login(page, diag: KlassenbuchDiagnosticsRun | None = None) -> None:
         raise
     except Exception as exc:
         await _raise_load_error(page, "login_failed", "Login ins Klassenbuch fehlgeschlagen", exc)
+
+
+async def test_klassenbuch_login(credentials: tuple[str, str] | None = None) -> dict:
+    diag = KlassenbuchDiagnosticsRun(_diagnostic_run_id(), "test_klassenbuch_login")
+    async with browser_page(storage_state_path=_storage_state_path()) as page:
+        _attach_diagnostic_listeners(page, diag)
+        await _start_trace(page, diag)
+        try:
+            await _login(page, diag, credentials)
+            await _stop_trace(page, diag)
+            summary = await _write_diagnostic_summary(page, diag, success=True, entries_returned=0)
+            return {"ok": True, "diagnostics": summary}
+        except KlassenbuchLoadError as exc:
+            await _stop_trace(page, diag)
+            summary = await _write_diagnostic_summary(page, diag, success=False, error_message=str(exc), exception_type=exc.diagnostics.get("exception_type", type(exc).__name__), diagnostics=exc.diagnostics)
+            exc.diagnostics.update(summary)
+            raise
 
 
 def _overview_url() -> str:
