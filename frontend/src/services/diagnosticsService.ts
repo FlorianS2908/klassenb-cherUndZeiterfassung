@@ -1,6 +1,7 @@
 import { apiGet } from './api';
 
 export const getLatestKlassenbuchDiagnostics = () => apiGet<Record<string, unknown>>('/api/diagnostics/klassenbuch/latest');
+export const exportLatestKlassenbuchDiagnostic = () => apiGet<Record<string, unknown>>('/api/diagnostics/klassenbuch/latest/export-sanitized');
 export const checkKlassenbuchBrowserHealth = () => apiGet<Record<string, unknown>>('/api/klassenbuch/browser-health');
 
 export const diagnosticFileUrl = (runId: string, name: string) =>

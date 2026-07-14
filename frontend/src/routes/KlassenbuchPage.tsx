@@ -5,7 +5,7 @@ import { RangeSelector } from '../components/RangeSelector/RangeSelector';
 import { UeEditor } from '../components/UeEditor/UeEditor';
 import { analyzeFile, getOpenAiStatus, previewRange, uploadFile } from '../services/fileService';
 import { saveAnalysisHistory } from '../services/analysisHistoryService';
-import { checkKlassenbuchBrowserHealth, diagnosticFileUrl, getLatestKlassenbuchDiagnostics } from '../services/diagnosticsService';
+import { checkKlassenbuchBrowserHealth, diagnosticFileUrl, exportLatestKlassenbuchDiagnostic, getLatestKlassenbuchDiagnostics } from '../services/diagnosticsService';
 import { getOpenKlassenbuecher, prepareKlassenbuch } from '../services/klassenbuchService';
 import { getStatus } from '../services/statusService';
 import type { AnalysisResult, AppStatus, KlassenbuchDiagnostics, KlassenbuchEntry, UeItem, UploadedFileInfo } from '../types';
@@ -120,6 +120,8 @@ export function KlassenbuchPage() {
   const [loadingBooks, setLoadingBooks] = useState(false);
   const [latestDiagnostics, setLatestDiagnostics] = useState<KlassenbuchDiagnostics | null>(null);
   const [browserHealth, setBrowserHealth] = useState<Record<string, unknown> | null>(null);
+  const [diagnosticExport, setDiagnosticExport] = useState<Record<string, unknown> | null>(null);
+  const [exportingDiagnostic, setExportingDiagnostic] = useState(false);
 
   useEffect(() => {
     getOpenAiStatus().then(setOpenAi);
@@ -194,6 +196,20 @@ export function KlassenbuchPage() {
     setBrowserHealth(result);
     const diagnostics = result.diagnostics as KlassenbuchDiagnostics | undefined;
     if (diagnostics) setLatestDiagnostics(diagnostics);
+  }
+
+  async function exportSanitizedDiagnostic() {
+    setExportingDiagnostic(true);
+    try {
+      const result = await exportLatestKlassenbuchDiagnostic();
+      setDiagnosticExport(result);
+      setWebRunMessage(`Fehlerbericht exportiert: ${String(result.export_folder ?? '-')}`);
+    } catch (error) {
+      setDiagnosticExport(null);
+      setWebRunMessage('Noch keine Diagnose vorhanden. Bitte zuerst Klassenbuecher laden.');
+    } finally {
+      setExportingDiagnostic(false);
+    }
   }
 
   return (
@@ -326,7 +342,14 @@ export function KlassenbuchPage() {
           <h2>Diagnose</h2>
           <button className="secondary" onClick={() => getLatestKlassenbuchDiagnostics().then((result) => setLatestDiagnostics(result as KlassenbuchDiagnostics))}>Letzte Diagnose oeffnen</button>
           <button className="secondary" onClick={runBrowserHealth}>Browser-Check ausfuehren</button>
+          <button className="secondary" onClick={exportSanitizedDiagnostic} disabled={exportingDiagnostic}>{exportingDiagnostic ? 'Exportiert...' : 'Fehlerbericht fuers Repo exportieren'}</button>
         </div>
+        {diagnosticExport?.export_folder && (
+          <div className="banner info">
+            <p><strong>Sanitisierter Export:</strong> {String(diagnosticExport.export_folder)}</p>
+            <p>Bitte nur den Ordner {String(diagnosticExport.export_folder)} committen. Die Rohdaten unter diagnostics/ nicht committen.</p>
+          </div>
+        )}
         {browserHealth && (
           <div className={browserHealth.ok ? 'banner info' : 'banner warning'}>
             <p><strong>Browser-Check:</strong> {browserHealth.ok ? 'ok' : 'Fehler'} · Schritt: {String(browserHealth.step ?? '-')}</p>
