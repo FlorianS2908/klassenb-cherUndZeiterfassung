@@ -27,6 +27,75 @@ def create_diagnostic_run(module: str, run_id: str) -> Path:
     return run_dir
 
 
+def diagnostic_run_id() -> str:
+    return datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+
+def explain_exception(exc: Exception) -> tuple[str, str]:
+    if type(exc).__name__ == "NotImplementedError" or "NotImplementedError" in str(exc):
+        return (
+            "Playwright/Chromium konnte nicht gestartet werden. Der Fehler trat vor dem Oeffnen der Klassenbuch-Webseite auf.",
+            "Playwright-Installation und Windows-Eventloop pruefen. python -m playwright install ausfuehren. Zusaetzlich ProactorEventLoopPolicy auf Windows setzen.",
+        )
+    return ("Fehler trat vor oder waehrend der Webautomation auf.", "Diagnoseordner pruefen und Browser-Check ausfuehren.")
+
+
+def exception_message(exc: Exception, prefix: str = "") -> str:
+    text = str(exc).strip() or f"unbekannter Fehler ({type(exc).__name__})"
+    return f"{prefix}: {text}" if prefix else text
+
+
+def write_route_error_diagnostic(module: str, action: str, step: str, exc: Exception, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    run_id = diagnostic_run_id()
+    run_dir = create_diagnostic_run(module, run_id)
+    probable_cause, next_action = explain_exception(exc)
+    message = exception_message(exc, "Klassenbuecher konnten nicht geladen werden")
+    now = datetime.now().isoformat(timespec="seconds")
+    relative_folder = str(Path("diagnostics") / _safe_name(module) / run_id)
+    summary = {
+        "run_id": run_id,
+        "module": module,
+        "action": action,
+        "started_at": now,
+        "finished_at": now,
+        "success": False,
+        "step": step,
+        "error_message": message,
+        "exception_type": type(exc).__name__,
+        "current_url": "",
+        "page_title": "",
+        "login_success": False,
+        "overview_loaded": False,
+        "tables_found": 0,
+        "rows_found": 0,
+        "entries_returned": 0,
+        "diagnostics_folder": relative_folder,
+        "summary_path": str(run_dir / "summary.json"),
+        "steps_path": str(run_dir / "steps.json"),
+        "console_log": str(run_dir / "console.log"),
+        "network_log": str(run_dir / "network.log"),
+        "trace_file": "",
+        "trace_path": "",
+        "probable_cause": probable_cause,
+        "next_action": next_action,
+        "notes": [],
+    }
+    if extra:
+        summary.update(extra)
+    steps = [
+        {
+            "step": step,
+            "success": False,
+            "exception_type": type(exc).__name__,
+            "message": message,
+            "timestamp": now,
+        }
+    ]
+    write_steps(run_dir, steps)
+    write_summary(run_dir, summary)
+    return summary
+
+
 def _mask_sensitive_html(html: str) -> str:
     masked = re.sub(r'(<input[^>]+type=["\']?password["\']?[^>]*value=)["\'][^"\']*["\']', r'\1"***"', html, flags=re.IGNORECASE)
     masked = re.sub(r'(<input[^>]+name=["\']?password["\']?[^>]*value=)["\'][^"\']*["\']', r'\1"***"', masked, flags=re.IGNORECASE)

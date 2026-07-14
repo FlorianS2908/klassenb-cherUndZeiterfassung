@@ -52,11 +52,21 @@ async def optional_click(page: Page, selectors: list[str]) -> bool:
 
 @asynccontextmanager
 async def browser_page() -> AsyncIterator[Page]:
-    playwright = await async_playwright().start()
+    try:
+        playwright = await async_playwright().start()
+    except NotImplementedError as exc:
+        raise RuntimeError("Playwright-Browserstart fehlgeschlagen: NotImplementedError. Wahrscheinlich Windows asyncio Eventloop/Subprocess-Problem.") from exc
+    except Exception as exc:
+        raise RuntimeError("Playwright konnte nicht gestartet werden. Bitte Playwright installieren und Windows-Eventloop pruefen.") from exc
     browser: Browser | None = None
     context: BrowserContext | None = None
     try:
-        browser = await playwright.chromium.launch(headless=False)
+        try:
+            browser = await playwright.chromium.launch(headless=False)
+        except NotImplementedError as exc:
+            raise RuntimeError("Playwright-Browserstart fehlgeschlagen: NotImplementedError. Wahrscheinlich Windows asyncio Eventloop/Subprocess-Problem.") from exc
+        except Exception as exc:
+            raise RuntimeError("Chromium konnte nicht gestartet werden. Bitte python -m playwright install ausfuehren.") from exc
         context = await browser.new_context(viewport={"width": 1440, "height": 1000})
         page = await context.new_page()
         page.set_default_timeout(15000)

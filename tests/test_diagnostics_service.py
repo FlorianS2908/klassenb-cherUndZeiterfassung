@@ -40,3 +40,17 @@ def test_diagnostic_file_resolution_blocks_traversal(monkeypatch):
             diagnostics_service.resolve_diagnostic_file("klassenbuch", "run-1", "../secret.txt")
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_route_error_diagnostic_writes_summary_without_page(monkeypatch):
+    tmp_path = _workspace_tmp()
+    monkeypatch.setattr(diagnostics_service, "resolve_project_path", lambda value: tmp_path / value)
+    try:
+        summary = diagnostics_service.write_route_error_diagnostic("klassenbuch", "load_open_klassenbuecher", "route_open_books", NotImplementedError())
+        assert summary["exception_type"] == "NotImplementedError"
+        assert summary["probable_cause"]
+        assert summary["next_action"]
+        assert Path(summary["summary_path"]).exists()
+        assert Path(summary["steps_path"]).exists()
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)

@@ -84,6 +84,7 @@ export interface KlassenbuchDiagnostics {
   run_id?: string;
   diagnostics_folder?: string;
   summary_path?: string;
+  steps_path?: string;
   step?: string;
   current_url?: string;
   page_title?: string;
@@ -107,6 +108,11 @@ export interface KlassenbuchDiagnostics {
   entries_returned?: number;
   error_message?: string;
   success?: boolean;
+  login_success?: boolean;
+  overview_loaded?: boolean;
+  tabs?: Record<string, { found?: boolean; row_count?: number; entries_count?: number; error?: string }>;
+  probable_cause?: string;
+  next_action?: string;
 }
 
 export interface KlassenbuchOpenResponse {

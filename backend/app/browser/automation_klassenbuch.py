@@ -14,7 +14,7 @@ from app.browser.selectors_klassenbuch import KLASSENBUCH_SELECTORS
 from app.config import get_settings, resolve_project_path
 from app.models.schemas import StepState
 from app.models.schemas import ApiMessage
-from app.services.diagnostics_service import append_console_message, append_network_event, create_diagnostic_run, save_step_snapshot, write_steps, write_summary
+from app.services.diagnostics_service import append_console_message, append_network_event, create_diagnostic_run, explain_exception, save_step_snapshot, write_steps, write_summary
 from app.services.screenshot_service import save_page_screenshot, screenshot_name
 from app.services.status_service import status_service
 
@@ -141,6 +141,16 @@ async def _write_diagnostic_summary(
             pass
     screenshots = [step.get("screenshot_path", "") for step in diag.steps if step.get("screenshot_path")]
     html_snapshots = [step.get("html_snapshot_path", "") for step in diag.steps if step.get("html_snapshot_path")]
+    probable_cause = diagnostics.get("probable_cause", "")
+    next_action = diagnostics.get("next_action", "")
+    if exception_type:
+        class _NamedException(Exception):
+            pass
+
+        _NamedException.__name__ = exception_type
+        fallback_cause, fallback_action = explain_exception(_NamedException(error_message))
+        probable_cause = probable_cause or fallback_cause
+        next_action = next_action or fallback_action
     summary = {
         "run_id": diag.run_id,
         "module": "klassenbuch",
@@ -166,6 +176,8 @@ async def _write_diagnostic_summary(
         "html_snapshots": html_snapshots,
         "trace_file": diag.trace_file,
         "trace_error": diag.trace_error,
+        "probable_cause": probable_cause,
+        "next_action": next_action,
         "diagnostics_folder": diag.relative_folder,
         "summary_path": str(diag.run_dir / "summary.json"),
         "steps_path": str(diag.run_dir / "steps.json"),
@@ -619,70 +631,97 @@ async def load_open_klassenbuecher() -> list[dict[str, str]]:
 
 
 async def load_klassenbuecher_overview() -> dict:
-    async with browser_page() as page:
-        diag = KlassenbuchDiagnosticsRun(_diagnostic_run_id(), "load_open_klassenbuecher")
-        _attach_diagnostic_listeners(page, diag)
-        await _start_trace(page, diag)
-        try:
-            await _login(page, diag)
-            await _open_overview(page, diag)
-            entries, groups, tab_errors = await read_all_overview_tabs(page, diag)
-            diagnostics = await _overview_diagnostics(page)
-            diagnostics["tab_errors"] = tab_errors
-            diagnostics["run_id"] = diag.run_id
-            diagnostics["diagnostics_folder"] = diag.relative_folder
-            if not entries:
-                screenshot_path = await _safe_screenshot(page, "klassenbuch_overview_no_rows")
-                html_snapshot_path = await _safe_html_snapshot(page, "klassenbuch_overview_no_rows")
-                await _diag_step(page, diag, "overview_no_rows", {"message": "Keine Eintraege gefunden."})
-                diagnostics = await _overview_diagnostics(page, screenshot_path, html_snapshot_path)
-                diagnostics["step"] = "overview_no_rows"
+    diag = KlassenbuchDiagnosticsRun(_diagnostic_run_id(), "load_open_klassenbuecher")
+    page = None
+    try:
+        async with browser_page() as page:
+            _attach_diagnostic_listeners(page, diag)
+            await _start_trace(page, diag)
+            try:
+                await _login(page, diag)
+                await _open_overview(page, diag)
+                entries, groups, tab_errors = await read_all_overview_tabs(page, diag)
+                diagnostics = await _overview_diagnostics(page)
                 diagnostics["tab_errors"] = tab_errors
-                diagnostics["message"] = "Keine Eintraege gefunden. Diagnose gespeichert."
-            await _stop_trace(page, diag)
-            summary = await _write_diagnostic_summary(page, diag, success=True, entries_returned=len(entries), diagnostics=diagnostics)
-            diagnostics.update(
-                {
-                    "run_id": diag.run_id,
-                    "diagnostics_folder": diag.relative_folder,
-                    "summary_path": summary.get("summary_path", ""),
-                    "trace_path": summary.get("trace_file", ""),
-                    "console_log": summary.get("console_log", ""),
-                    "network_log": summary.get("network_log", ""),
-                }
-            )
-            return {"ok": True, "items": entries, "groups": groups, "diagnostics": diagnostics, "count": len(entries)}
-        except KlassenbuchLoadError as exc:
-            await _diag_step(page, diag, "error", {"error": str(exc), "exception_type": type(exc).__name__})
-            await _stop_trace(page, diag)
-            summary = await _write_diagnostic_summary(page, diag, success=False, error_message=str(exc), exception_type=exc.diagnostics.get("exception_type", type(exc).__name__), diagnostics=exc.diagnostics)
-            exc.diagnostics.update(
-                {
-                    "run_id": diag.run_id,
-                    "diagnostics_folder": diag.relative_folder,
-                    "summary_path": summary.get("summary_path", ""),
-                    "trace_path": summary.get("trace_file", ""),
-                    "console_log": summary.get("console_log", ""),
-                    "network_log": summary.get("network_log", ""),
-                }
-            )
-            raise
-        except Exception as exc:
-            diagnostics = await _failure_diagnostics(page, "overview_read", exc)
-            await _diag_step(page, diag, "error", {"error": _exception_message(exc, "Klassenbuecher konnten nicht geladen werden"), "exception_type": type(exc).__name__})
-            await _stop_trace(page, diag)
-            summary = await _write_diagnostic_summary(page, diag, success=False, error_message=_exception_message(exc, "Klassenbuecher konnten nicht geladen werden"), exception_type=type(exc).__name__, diagnostics=diagnostics)
-            diagnostics.update(
-                {
-                    "run_id": diag.run_id,
-                    "diagnostics_folder": diag.relative_folder,
-                    "summary_path": summary.get("summary_path", ""),
-                    "trace_path": summary.get("trace_file", ""),
-                    "console_log": summary.get("console_log", ""),
-                    "network_log": summary.get("network_log", ""),
-                }
-            )
-            raise KlassenbuchLoadError(f"Klassenbuecher konnten nicht geladen werden: {_exception_message(exc, 'unbekannter Fehler')}", diagnostics) from exc
+                diagnostics["run_id"] = diag.run_id
+                diagnostics["diagnostics_folder"] = diag.relative_folder
+                if not entries:
+                    screenshot_path = await _safe_screenshot(page, "klassenbuch_overview_no_rows")
+                    html_snapshot_path = await _safe_html_snapshot(page, "klassenbuch_overview_no_rows")
+                    await _diag_step(page, diag, "overview_no_rows", {"message": "Keine Eintraege gefunden."})
+                    diagnostics = await _overview_diagnostics(page, screenshot_path, html_snapshot_path)
+                    diagnostics["step"] = "overview_no_rows"
+                    diagnostics["tab_errors"] = tab_errors
+                    diagnostics["message"] = "Keine Eintraege gefunden. Diagnose gespeichert."
+                await _stop_trace(page, diag)
+                summary = await _write_diagnostic_summary(page, diag, success=True, entries_returned=len(entries), diagnostics=diagnostics)
+                diagnostics.update(
+                    {
+                        "run_id": diag.run_id,
+                        "diagnostics_folder": diag.relative_folder,
+                        "summary_path": summary.get("summary_path", ""),
+                        "trace_path": summary.get("trace_file", ""),
+                        "console_log": summary.get("console_log", ""),
+                        "network_log": summary.get("network_log", ""),
+                    }
+                )
+                return {"ok": True, "items": entries, "groups": groups, "diagnostics": diagnostics, "count": len(entries)}
+            except KlassenbuchLoadError as exc:
+                await _diag_step(page, diag, "error", {"error": str(exc), "exception_type": type(exc).__name__})
+                await _stop_trace(page, diag)
+                summary = await _write_diagnostic_summary(page, diag, success=False, error_message=str(exc), exception_type=exc.diagnostics.get("exception_type", type(exc).__name__), diagnostics=exc.diagnostics)
+                exc.diagnostics.update(
+                    {
+                        "run_id": diag.run_id,
+                        "diagnostics_folder": diag.relative_folder,
+                        "summary_path": summary.get("summary_path", ""),
+                        "trace_path": summary.get("trace_file", ""),
+                        "console_log": summary.get("console_log", ""),
+                        "network_log": summary.get("network_log", ""),
+                    }
+                )
+                raise
+            except Exception as exc:
+                diagnostics = await _failure_diagnostics(page, "overview_read", exc)
+                await _diag_step(page, diag, "error", {"error": _exception_message(exc, "Klassenbuecher konnten nicht geladen werden"), "exception_type": type(exc).__name__})
+                await _stop_trace(page, diag)
+                summary = await _write_diagnostic_summary(page, diag, success=False, error_message=_exception_message(exc, "Klassenbuecher konnten nicht geladen werden"), exception_type=type(exc).__name__, diagnostics=diagnostics)
+                diagnostics.update(
+                    {
+                        "run_id": diag.run_id,
+                        "diagnostics_folder": diag.relative_folder,
+                        "summary_path": summary.get("summary_path", ""),
+                        "trace_path": summary.get("trace_file", ""),
+                        "console_log": summary.get("console_log", ""),
+                        "network_log": summary.get("network_log", ""),
+                    }
+                )
+                raise KlassenbuchLoadError(f"Klassenbuecher konnten nicht geladen werden: {_exception_message(exc, 'unbekannter Fehler')}", diagnostics) from exc
+    except KlassenbuchLoadError:
+        raise
+    except Exception as exc:
+        diagnostics = {
+            "run_id": diag.run_id,
+            "diagnostics_folder": diag.relative_folder,
+            "step": "browser_start",
+            "current_url": "",
+            "page_title": "",
+            "screenshot_path": "",
+            "html_snapshot_path": "",
+            "exception_type": type(exc).__name__,
+        }
+        summary = await _write_diagnostic_summary(None, diag, success=False, error_message=_exception_message(exc, "Klassenbuecher konnten nicht geladen werden"), exception_type=type(exc).__name__, diagnostics=diagnostics)
+        diagnostics.update(
+            {
+                "summary_path": summary.get("summary_path", ""),
+                "trace_path": summary.get("trace_file", ""),
+                "console_log": summary.get("console_log", ""),
+                "network_log": summary.get("network_log", ""),
+                "probable_cause": summary.get("probable_cause", "Playwright/Chromium konnte nicht gestartet werden. Der Fehler trat vor dem Oeffnen der Klassenbuch-Webseite auf."),
+                "next_action": summary.get("next_action", "Browser-Check ausfuehren und Playwright-Installation pruefen."),
+            }
+        )
+        raise KlassenbuchLoadError(f"Klassenbuecher konnten nicht geladen werden: {_exception_message(exc, 'unbekannter Fehler')}", diagnostics) from exc
 
 
 async def _select_entry(page, payload: dict, diag: KlassenbuchDiagnosticsRun | None = None) -> None:

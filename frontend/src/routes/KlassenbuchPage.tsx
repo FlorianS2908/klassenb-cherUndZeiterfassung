@@ -5,7 +5,7 @@ import { RangeSelector } from '../components/RangeSelector/RangeSelector';
 import { UeEditor } from '../components/UeEditor/UeEditor';
 import { analyzeFile, getOpenAiStatus, previewRange, uploadFile } from '../services/fileService';
 import { saveAnalysisHistory } from '../services/analysisHistoryService';
-import { diagnosticFileUrl, getLatestKlassenbuchDiagnostics } from '../services/diagnosticsService';
+import { checkKlassenbuchBrowserHealth, diagnosticFileUrl, getLatestKlassenbuchDiagnostics } from '../services/diagnosticsService';
 import { getOpenKlassenbuecher, prepareKlassenbuch } from '../services/klassenbuchService';
 import type { AnalysisResult, KlassenbuchDiagnostics, KlassenbuchEntry, UeItem, UploadedFileInfo } from '../types';
 import { ApiError } from '../services/api';
@@ -50,6 +50,8 @@ function DiagnosticLinks({ diagnostics }: { diagnostics: KlassenbuchDiagnostics 
   const links = [
     ['Screenshot', diagnostics.screenshot_path || diagnostics.screenshots?.[diagnostics.screenshots.length - 1]],
     ['HTML-Snapshot', diagnostics.html_snapshot_path || diagnostics.html_snapshots?.[diagnostics.html_snapshots.length - 1]],
+    ['Summary', diagnostics.summary_path],
+    ['Steps', diagnostics.steps_path],
     ['Console-Log', diagnostics.console_log],
     ['Network-Log', diagnostics.network_log],
     ['Playwright Trace', diagnostics.trace_path || diagnostics.trace_file],
@@ -63,6 +65,20 @@ function DiagnosticLinks({ diagnostics }: { diagnostics: KlassenbuchDiagnostics 
       })}
     </div>
   );
+}
+
+function DiagnosticStatusCards({ diagnostics }: { diagnostics: KlassenbuchDiagnostics }) {
+  const tabsFound = diagnostics.tabs ? Object.values(diagnostics.tabs).filter((tab) => tab.found).length : undefined;
+  const cards = [
+    ['Browserstart', diagnostics.exception_type === 'NotImplementedError' ? 'Fehler' : 'ok/unklar'],
+    ['Login', diagnostics.login_success ? 'ok' : 'offen'],
+    ['Overview', diagnostics.overview_loaded ? 'ok' : 'offen'],
+    ['Tabs', tabsFound ?? '-'],
+    ['Tabellen', diagnostics.table_count ?? diagnostics.tables_found ?? '-'],
+    ['Zeilen', diagnostics.row_count ?? diagnostics.rows_found ?? '-'],
+    ['Eintraege', diagnostics.entries_returned ?? '-'],
+  ];
+  return <div className="cards small-cards">{cards.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>;
 }
 
 export function KlassenbuchPage() {
@@ -80,6 +96,7 @@ export function KlassenbuchPage() {
   const [webRunMessage, setWebRunMessage] = useState('');
   const [loadingBooks, setLoadingBooks] = useState(false);
   const [latestDiagnostics, setLatestDiagnostics] = useState<KlassenbuchDiagnostics | null>(null);
+  const [browserHealth, setBrowserHealth] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     getOpenAiStatus().then(setOpenAi);
@@ -142,6 +159,19 @@ export function KlassenbuchPage() {
     setWebRunMessage(JSON.stringify(result, null, 2));
   }
 
+  async function openLatestDiagnostics() {
+    const result = await getLatestKlassenbuchDiagnostics();
+    setLatestDiagnostics(result as KlassenbuchDiagnostics);
+    if (!Object.keys(result).length) setWebRunMessage('Noch keine Diagnose vorhanden. Bitte zuerst Klassenbuecher laden.');
+  }
+
+  async function runBrowserHealth() {
+    const result = await checkKlassenbuchBrowserHealth();
+    setBrowserHealth(result);
+    const diagnostics = result.diagnostics as KlassenbuchDiagnostics | undefined;
+    if (diagnostics) setLatestDiagnostics(diagnostics);
+  }
+
   return (
     <>
       <div className="page-head"><h1>Klassenbuch</h1></div>
@@ -191,7 +221,10 @@ export function KlassenbuchPage() {
       <section className="panel">
         <div className="page-head">
           <h2>Klassenbuecher</h2>
-          <button className="secondary" onClick={loadOpenBooks} disabled={loadingBooks}>{loadingBooks ? 'Laedt...' : 'Klassenbuecher laden'}</button>
+          <div className="actions">
+            <button className="secondary" onClick={loadOpenBooks} disabled={loadingBooks}>{loadingBooks ? 'Laedt...' : 'Klassenbuecher laden'}</button>
+            <button className="secondary" onClick={openLatestDiagnostics}>Letzte Diagnose oeffnen</button>
+          </div>
         </div>
         {webRunMessage && <div className="banner info">{webRunMessage}</div>}
         {openBooks.length === 0 && bookDiagnostics && (
@@ -266,17 +299,34 @@ export function KlassenbuchPage() {
         <div className="page-head">
           <h2>Diagnose</h2>
           <button className="secondary" onClick={() => getLatestKlassenbuchDiagnostics().then((result) => setLatestDiagnostics(result as KlassenbuchDiagnostics))}>Letzte Diagnose oeffnen</button>
+          <button className="secondary" onClick={runBrowserHealth}>Browser-Check ausfuehren</button>
         </div>
+        {browserHealth && (
+          <div className={browserHealth.ok ? 'banner info' : 'banner warning'}>
+            <p><strong>Browser-Check:</strong> {browserHealth.ok ? 'ok' : 'Fehler'} · Schritt: {String(browserHealth.step ?? '-')}</p>
+            <p>{String(browserHealth.message ?? '')}</p>
+          </div>
+        )}
         {latestDiagnostics?.run_id ? (
           <div className="banner info">
+            {latestDiagnostics.exception_type === 'NotImplementedError' && (
+              <div className="banner warning">
+                <h3>Browser konnte nicht gestartet werden</h3>
+                <p>Der Fehler ist vor dem Oeffnen der Klassenbuch-Webseite aufgetreten. Es liegt sehr wahrscheinlich an Playwright/Chromium oder am Windows-Eventloop, nicht an den Klassenbuch-Selektoren.</p>
+                <p>Naechste Schritte: KlassenbuchTool_starten.bat erneut starten, Playwright-Installation pruefen, ggf. python -m playwright install ausfuehren und Browser-Check erneut starten.</p>
+              </div>
+            )}
             <p><strong>Letzter Klassenbuch-Lauf:</strong> {latestDiagnostics.run_id}</p>
             <p>Ergebnis: {latestDiagnostics.success ? 'Erfolg' : 'Fehler'} · Eintraege: {latestDiagnostics.entries_returned ?? '-'}</p>
             <p>Fehler: {latestDiagnostics.error_message || '-'}</p>
+            <p>Wahrscheinliche Ursache: {latestDiagnostics.probable_cause || '-'}</p>
+            <p>Naechste Aktion: {latestDiagnostics.next_action || '-'}</p>
             <p>Schritt: {latestDiagnostics.step || '-'}</p>
             <p>URL: {latestDiagnostics.current_url || '-'}</p>
             <p>Titel: {latestDiagnostics.page_title || '-'}</p>
             <p>Tabellen: {latestDiagnostics.table_count ?? latestDiagnostics.tables_found ?? '-'} · Zeilen: {latestDiagnostics.row_count ?? latestDiagnostics.rows_found ?? '-'}</p>
             <p>Diagnoseordner: {latestDiagnostics.diagnostics_folder || '-'}</p>
+            <DiagnosticStatusCards diagnostics={latestDiagnostics} />
             <DiagnosticLinks diagnostics={latestDiagnostics} />
           </div>
         ) : <p className="muted">Noch kein Klassenbuch-Diagnoselauf vorhanden.</p>}
