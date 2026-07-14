@@ -1,6 +1,7 @@
 .env
 __pycache__/
 .venv/
+.tools/
 node_modules/
 dist/
 logs/
@@ -22,3 +23,5 @@ credentials/
 .pytest_tmp/
 pytest-cache-files-*/
 .mypy_cache/
+start_test.log
+.tools/logs/
