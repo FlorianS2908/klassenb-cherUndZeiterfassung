@@ -13,3 +13,4 @@ markdown>=3.6
 openai>=1.35.0
 pytest>=8.2.0
 plyer>=2.1.0
+keyring>=25.0.0

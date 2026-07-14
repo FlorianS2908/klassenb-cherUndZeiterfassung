@@ -17,3 +17,7 @@ export async function validateOpenAiKeyFile(path: string) {
 export async function saveSetup(payload: SetupPayload) {
   return apiPost<ApiMessage>('/api/setup/save', payload);
 }
+
+export async function testKlassenbuchLogin() {
+  return apiPost<ApiMessage>('/api/setup/test-klassenbuch-login');
+}

@@ -117,7 +117,11 @@ class SetupDefaults(BaseModel):
     klassenbuch_url: str
     timebutler_url: str
     klassenbuch_username: str = ""
+    klassenbuch_password_present: bool = False
+    klassenbuch_password_source: str = "missing"
     timebutler_username: str = ""
+    timebutler_password_present: bool = False
+    timebutler_password_source: str = "missing"
     use_separate_timebutler_credentials: bool = False
     openai_api_key_file: str = ""
     openai_model: str = "gpt-4o-mini"

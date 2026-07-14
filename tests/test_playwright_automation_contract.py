@@ -1,5 +1,9 @@
 from app.browser.selectors_klassenbuch import KLASSENBUCH_SELECTORS
 from pathlib import Path
+import inspect
+import asyncio
+
+from app.browser import automation_klassenbuch
 from app.browser.automation_klassenbuch import _extract_edit_action_index, _interpolate_points, _normalize_table_key, _row_to_entry, _signature_points, _validate_signature_submit_allowed
 from app.browser.base import first_locator
 from app.browser.selectors_timebutler import TIMEBUTLER_SELECTORS
@@ -108,3 +112,28 @@ def test_first_locator_uses_nth_zero():
     scope = ScopeMock()
     result = first_locator(scope, "body")
     assert result.index == 0
+
+
+def test_login_uses_credentials_service_instead_of_settings_password():
+    source = inspect.getsource(automation_klassenbuch._login)
+
+    assert "get_klassenbuch_credentials()" in source
+    assert "settings.klassenbuch_password" not in source
+
+
+def test_save_html_snapshot_masks_password_values(monkeypatch):
+    class PageMock:
+        async def content(self):
+            return '<input type="password" value="secret-one"><div>secret-one</div>'
+
+    snapshot_dir = ROOT / ".tools" / "test_env" / "html_snapshot_masks_password"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    settings = get_settings().model_copy(update={"screenshot_folder": str(snapshot_dir), "klassenbuch_password": "secret-one"})
+    monkeypatch.setattr(automation_klassenbuch, "get_settings", lambda: settings)
+    monkeypatch.setattr(automation_klassenbuch, "get_klassenbuch_credentials", lambda: ("trainer@example.com", "secret-one"))
+
+    path = asyncio.run(automation_klassenbuch.save_html_snapshot(PageMock(), "login"))
+    content = Path(path).read_text(encoding="utf-8")
+
+    assert "secret-one" not in content
+    assert "***" in content

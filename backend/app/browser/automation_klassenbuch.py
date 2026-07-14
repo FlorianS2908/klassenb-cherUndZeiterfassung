@@ -14,6 +14,7 @@ from app.browser.selectors_klassenbuch import KLASSENBUCH_SELECTORS
 from app.config import get_settings, resolve_project_path
 from app.models.schemas import StepState
 from app.models.schemas import ApiMessage
+from app.services.credentials_service import get_klassenbuch_credentials
 from app.services.diagnostics_service import append_console_message, append_network_event, categorize_problem, create_diagnostic_run, explain_exception, save_step_snapshot, write_steps, write_summary
 from app.services.screenshot_service import save_page_screenshot, screenshot_name
 from app.services.status_service import status_service
@@ -210,7 +211,13 @@ async def save_html_snapshot(page, name: str) -> str:
         safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name)
         path = folder / f"{_run_id()}_{safe_name}.html"
         html = await page.content()
-        for secret in [settings.klassenbuch_password, settings.timebutler_password]:
+        secrets = [settings.klassenbuch_password, settings.timebutler_password]
+        try:
+            _, klassenbuch_password = get_klassenbuch_credentials()
+            secrets.append(klassenbuch_password)
+        except Exception:
+            pass
+        for secret in secrets:
             if secret:
                 html = html.replace(secret, "***")
         html = re.sub(r'(<input[^>]+type=["\']?password["\']?[^>]*value=)["\'][^"\']*["\']', r'\1"***"', html, flags=re.IGNORECASE)
@@ -349,6 +356,7 @@ async def _wait_for_login_result(page) -> bool:
 
 async def _login(page, diag: KlassenbuchDiagnosticsRun | None = None) -> None:
     settings = get_settings()
+    username, password = get_klassenbuch_credentials()
     try:
         if _storage_state_path().exists():
             await page.goto(_overview_url(), wait_until="domcontentloaded")
@@ -374,8 +382,8 @@ async def _login(page, diag: KlassenbuchDiagnosticsRun | None = None) -> None:
             if diag:
                 diag.login_success = True
             return
-        await fill_first(page, KLASSENBUCH_SELECTORS["username"], settings.klassenbuch_username, "Benutzername")
-        await fill_first(page, KLASSENBUCH_SELECTORS["password"], settings.klassenbuch_password, "Passwort")
+        await fill_first(page, KLASSENBUCH_SELECTORS["username"], username, "Benutzername")
+        await fill_first(page, KLASSENBUCH_SELECTORS["password"], password, "Passwort")
         await click_first(page, KLASSENBUCH_SELECTORS["login_button"], "Anmelden")
         await _diag_step(page, diag, "login_submitted")
         try:

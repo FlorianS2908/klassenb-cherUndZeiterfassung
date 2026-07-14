@@ -1,14 +1,18 @@
 import { Eye, EyeOff, KeyRound, RotateCcw, Save, ShieldCheck, TestTube2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { OpenAiKeyFileCheck, SetupPayload } from '../types';
-import { checkSetup, getSetupDefaults, saveSetup, validateOpenAiKeyFile } from '../services/setupService';
+import { checkSetup, getSetupDefaults, saveSetup, testKlassenbuchLogin, validateOpenAiKeyFile } from '../services/setupService';
 
 const emptyPayload: SetupPayload = {
   klassenbuch_url: '',
   timebutler_url: '',
   klassenbuch_username: '',
+  klassenbuch_password_present: false,
+  klassenbuch_password_source: 'missing',
   klassenbuch_password: '',
   timebutler_username: '',
+  timebutler_password_present: false,
+  timebutler_password_source: 'missing',
   timebutler_password: '',
   use_separate_timebutler_credentials: false,
   openai_api_key_file: '',
@@ -58,6 +62,7 @@ export function SetupPage({ setPage }: Props) {
   const [envExists, setEnvExists] = useState(false);
   const [showSecrets, setShowSecrets] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testingLogin, setTestingLogin] = useState(false);
 
   useEffect(() => {
     getSetupDefaults()
@@ -67,7 +72,16 @@ export function SetupPage({ setPage }: Props) {
         setForm(next);
       })
       .catch(() => setStatus({ kind: 'error', text: 'Setup-Standardwerte konnten nicht geladen werden.' }));
-    checkSetup().then((response) => setEnvExists(response.data.env_exists)).catch(() => setEnvExists(false));
+    checkSetup()
+      .then((response) => {
+        setEnvExists(response.data.env_exists);
+        const credentials = response.data.config_public.credentials as Partial<SetupPayload> | undefined;
+        if (credentials) {
+          setForm((current) => ({ ...current, ...credentials }));
+          setDefaults((current) => ({ ...current, ...credentials }));
+        }
+      })
+      .catch(() => setEnvExists(false));
   }, []);
 
   function setValue<K extends keyof SetupPayload>(key: K, value: SetupPayload[K]) {
@@ -110,11 +124,28 @@ export function SetupPage({ setPage }: Props) {
     try {
       const response = await saveSetup(form);
       setStatus({ kind: response.ok ? 'success' : 'error', text: response.message });
-      if (response.ok) setPage('dashboard');
+      if (response.ok) {
+        const configPublic = response.data.config_public as { credentials?: Partial<SetupPayload> } | undefined;
+        if (configPublic?.credentials) setForm((current) => ({ ...current, ...configPublic.credentials }));
+        setForm((current) => ({ ...current, klassenbuch_password: '', timebutler_password: '', openai_api_key: '' }));
+      }
     } catch (error) {
       setStatus({ kind: 'error', text: 'Setup konnte nicht gespeichert werden. Bitte Pflichtfelder und Zeitformat pruefen.' });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function runKlassenbuchLoginTest() {
+    setTestingLogin(true);
+    setStatus(null);
+    try {
+      const response = await testKlassenbuchLogin();
+      setStatus({ kind: response.ok ? 'success' : 'error', text: response.message });
+    } catch (error) {
+      setStatus({ kind: 'error', text: 'Login fehlgeschlagen. Bitte Benutzername und Passwort neu eingeben.' });
+    } finally {
+      setTestingLogin(false);
     }
   }
 
@@ -125,7 +156,7 @@ export function SetupPage({ setPage }: Props) {
       <div className="page-head">
         <div>
           <h1>Einrichtung Klassenbuch & Zeiterfassung</h1>
-          <p>Die Zugangsdaten werden nur lokal in der .env gespeichert. Sie werden nicht angezeigt, nicht geloggt und nicht ins Repository uebernommen.</p>
+          <p>Passwoerter werden bevorzugt im Windows Credential Manager gespeichert. Sie werden nicht angezeigt, nicht geloggt und nicht ins Repository uebernommen.</p>
         </div>
         <div className="actions compact">
           <button className="secondary" onClick={() => setShowSecrets((value) => !value)}>
@@ -161,6 +192,16 @@ export function SetupPage({ setPage }: Props) {
             Klassenbuch Passwort
             <input type={secretType} value={form.klassenbuch_password} placeholder="Leer lassen = vorhandenes Passwort behalten" onChange={(event) => setValue('klassenbuch_password', event.target.value)} />
           </label>
+          <p className="wide muted">Das Passwort wird bevorzugt im Windows Credential Manager gespeichert. Es wird nicht im Code und nicht im Repository abgelegt.</p>
+          <div className="small-cards wide">
+            <div><span>Klassenbuch Passwort gespeichert</span><strong>{form.klassenbuch_password_present ? 'Ja' : 'Nein'}</strong></div>
+            <div><span>Speicherort</span><strong>{form.klassenbuch_password_source === 'keyring' ? 'Windows Credential Manager' : form.klassenbuch_password_source === 'env' ? '.env Fallback' : 'Fehlt'}</strong></div>
+          </div>
+          <div className="actions wide">
+            <button className="secondary" onClick={runKlassenbuchLoginTest} disabled={testingLogin || !form.klassenbuch_password_present}>
+              <TestTube2 size={18} /> {testingLogin ? 'Test laeuft...' : 'Klassenbuch-Login testen'}
+            </button>
+          </div>
           <label className="field wide">
             Timebutler URL
             <input value={form.timebutler_url} onChange={(event) => setValue('timebutler_url', event.target.value)} />

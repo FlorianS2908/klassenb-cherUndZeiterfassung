@@ -97,20 +97,44 @@ def test_check_setup_detects_missing_required_values(monkeypatch):
     assert "KLASSENBUCH_PASSWORD" in result.missing
 
 
-def test_save_setup_writes_env_without_returning_secrets(monkeypatch):
+def test_save_setup_stores_password_in_keyring_without_env_secret(monkeypatch):
     env_path = _env_path()
     monkeypatch.setattr(config, "ENV_PATH", env_path)
     monkeypatch.setattr(setup_service, "ENV_PATH", env_path)
+    stored = {}
+    monkeypatch.setattr(setup_service, "set_secret", lambda service, username, password: stored.update({(service, username): password}))
+    monkeypatch.setattr(setup_service, "has_secret", lambda service, username: (service, username) in stored)
     config.get_settings.cache_clear()
 
     result = setup_service.save_setup(_payload())
     content = env_path.read_text(encoding="utf-8")
 
-    assert "KLASSENBUCH_PASSWORD" in content
-    assert "secret-one" in content
+    assert stored[("klassenbuch.gfn.de", "trainer@example.com")] == "secret-one"
+    assert 'KLASSENBUCH_PASSWORD=""' in content
+    assert 'KLASSENBUCH_PASSWORD_SOURCE="keyring"' in content
+    assert "secret-one" not in content
     assert "secret-one" not in str(result)
     assert "secret-two" not in str(result)
     assert (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines().count(".env") >= 1
+
+
+def test_save_setup_falls_back_to_env_when_keyring_unavailable(monkeypatch):
+    env_path = _env_path()
+    monkeypatch.setattr(config, "ENV_PATH", env_path)
+    monkeypatch.setattr(setup_service, "ENV_PATH", env_path)
+
+    def fail_secret(service, username, password):
+        raise setup_service.SecretStoreUnavailable("no keyring")
+
+    monkeypatch.setattr(setup_service, "set_secret", fail_secret)
+    config.get_settings.cache_clear()
+
+    result = setup_service.save_setup(_payload())
+    content = env_path.read_text(encoding="utf-8")
+
+    assert 'KLASSENBUCH_PASSWORD="secret-one"' in content
+    assert 'KLASSENBUCH_PASSWORD_SOURCE="env"' in content
+    assert result["warnings"]
 
 
 def test_save_setup_preserves_existing_password_when_form_is_empty(monkeypatch):

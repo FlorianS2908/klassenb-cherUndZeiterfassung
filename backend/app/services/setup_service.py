@@ -6,9 +6,12 @@ from dotenv import dotenv_values
 
 from app.config import ENV_PATH, ROOT_DIR, get_settings, resolve_project_path
 from app.models.schemas import OpenAiKeyFileCheck, SetupCheckResult, SetupDefaults, SetupPayload
+from app.services.credentials_service import KLASSENBUCH_SERVICE, TIMEBUTLER_SERVICE
+from app.services.secret_store import SecretStoreUnavailable, has_secret, set_secret
 
 GITIGNORE_REQUIRED_LINES = [
     ".env",
+    "*.env",
     "api_key_klassenbuch.txt",
     "api_key*.txt",
     "*.key",
@@ -18,6 +21,7 @@ GITIGNORE_REQUIRED_LINES = [
     "uploads/",
     "screenshots/",
     "logs/",
+    "diagnostics/",
     "error_reports/",
     "analysis_history/",
     "node_modules/",
@@ -57,8 +61,10 @@ def _payload_to_env(payload: SetupPayload, existing: dict[str, str]) -> dict[str
         "TIMEBUTLER_URL": payload.timebutler_url,
         "KLASSENBUCH_USERNAME": payload.klassenbuch_username,
         "KLASSENBUCH_PASSWORD": klassenbuch_password,
+        "KLASSENBUCH_PASSWORD_SOURCE": existing.get("KLASSENBUCH_PASSWORD_SOURCE", "env"),
         "TIMEBUTLER_USERNAME": timebutler_username,
         "TIMEBUTLER_PASSWORD": timebutler_password,
+        "TIMEBUTLER_PASSWORD_SOURCE": existing.get("TIMEBUTLER_PASSWORD_SOURCE", "env"),
         "OPENAI_API_KEY_FILE": payload.openai_api_key_file,
         "OPENAI_API_KEY": openai_api_key,
         "OPENAI_MODEL": payload.openai_model,
@@ -96,16 +102,56 @@ def _payload_to_env(payload: SetupPayload, existing: dict[str, str]) -> dict[str
 
 
 def _missing_from_env(values: dict[str, str]) -> list[str]:
-    missing = [
-        key
-        for key in ["KLASSENBUCH_URL", "TIMEBUTLER_URL", "KLASSENBUCH_USERNAME", "KLASSENBUCH_PASSWORD"]
-        if not values.get(key, "").strip()
-    ]
+    missing = [key for key in ["KLASSENBUCH_URL", "TIMEBUTLER_URL", "KLASSENBUCH_USERNAME"] if not values.get(key, "").strip()]
+    if not _has_password(values, "KLASSENBUCH", KLASSENBUCH_SERVICE):
+        missing.append("KLASSENBUCH_PASSWORD")
     if values.get("TIMEBUTLER_USERNAME", "").strip() and not values.get("TIMEBUTLER_PASSWORD", "").strip():
         missing.append("TIMEBUTLER_PASSWORD")
     if values.get("TIMEBUTLER_PASSWORD", "").strip() and not values.get("TIMEBUTLER_USERNAME", "").strip():
         missing.append("TIMEBUTLER_USERNAME")
     return missing
+
+
+def _has_password(values: dict[str, str], prefix: str, service: str) -> bool:
+    username = values.get(f"{prefix}_USERNAME", "").strip()
+    if values.get(f"{prefix}_PASSWORD", "").strip():
+        return True
+    if values.get(f"{prefix}_PASSWORD_SOURCE", "env") == "keyring" and username:
+        return has_secret(service, username)
+    return False
+
+
+def _store_password(
+    *,
+    values: dict[str, str],
+    prefix: str,
+    service: str,
+    username: str,
+    submitted_password: str,
+    existing_password: str,
+    warnings: list[str],
+) -> None:
+    if submitted_password:
+        if not username.strip():
+            values[f"{prefix}_PASSWORD"] = submitted_password
+            values[f"{prefix}_PASSWORD_SOURCE"] = "env"
+            return
+        try:
+            set_secret(service, username, submitted_password)
+            values[f"{prefix}_PASSWORD"] = ""
+            values[f"{prefix}_PASSWORD_SOURCE"] = "keyring"
+            return
+        except SecretStoreUnavailable:
+            values[f"{prefix}_PASSWORD"] = submitted_password
+            values[f"{prefix}_PASSWORD_SOURCE"] = "env"
+            warnings.append("Windows Credential Manager nicht verfuegbar. Passwort wird lokal in .env gespeichert.")
+            return
+    if username.strip() and has_secret(service, username):
+        values[f"{prefix}_PASSWORD"] = ""
+        values[f"{prefix}_PASSWORD_SOURCE"] = "keyring"
+        return
+    values[f"{prefix}_PASSWORD"] = existing_password
+    values[f"{prefix}_PASSWORD_SOURCE"] = "env" if existing_password else values.get(f"{prefix}_PASSWORD_SOURCE", "env")
 
 
 def _ensure_gitignore() -> None:
@@ -134,7 +180,11 @@ def default_setup_values() -> SetupDefaults:
         klassenbuch_url=settings.klassenbuch_url,
         timebutler_url=settings.timebutler_url,
         klassenbuch_username=settings.klassenbuch_username,
+        klassenbuch_password_present=bool(settings.klassenbuch_password) or has_secret(KLASSENBUCH_SERVICE, settings.klassenbuch_username),
+        klassenbuch_password_source=settings.klassenbuch_password_source if (settings.klassenbuch_password or has_secret(KLASSENBUCH_SERVICE, settings.klassenbuch_username)) else "missing",
         timebutler_username=settings.timebutler_username,
+        timebutler_password_present=bool(settings.timebutler_password) or has_secret(TIMEBUTLER_SERVICE, settings.effective_timebutler_username),
+        timebutler_password_source=settings.timebutler_password_source if (settings.timebutler_password or has_secret(TIMEBUTLER_SERVICE, settings.effective_timebutler_username)) else "missing",
         use_separate_timebutler_credentials=bool(settings.timebutler_username or settings.timebutler_password),
         openai_api_key_file=settings.openai_api_key_file,
         openai_model=settings.openai_model,
@@ -217,8 +267,35 @@ def validate_setup_payload(payload: SetupPayload, env_values: dict[str, str]) ->
 
 def save_setup(payload: SetupPayload) -> dict[str, object]:
     existing = _existing_env()
-    validate_setup_payload(payload, existing)
     values = _payload_to_env(payload, existing)
+    warnings: list[str] = []
+    _store_password(
+        values=values,
+        prefix="KLASSENBUCH",
+        service=KLASSENBUCH_SERVICE,
+        username=payload.klassenbuch_username,
+        submitted_password=payload.klassenbuch_password,
+        existing_password=existing.get("KLASSENBUCH_PASSWORD", ""),
+        warnings=warnings,
+    )
+    if payload.use_separate_timebutler_credentials:
+        _store_password(
+            values=values,
+            prefix="TIMEBUTLER",
+            service=TIMEBUTLER_SERVICE,
+            username=payload.timebutler_username,
+            submitted_password=payload.timebutler_password,
+            existing_password=existing.get("TIMEBUTLER_PASSWORD", ""),
+            warnings=warnings,
+        )
+    else:
+        values["TIMEBUTLER_PASSWORD"] = ""
+        values["TIMEBUTLER_PASSWORD_SOURCE"] = "env"
+    missing = _missing_from_env(values)
+    if missing:
+        if "KLASSENBUCH_PASSWORD" in missing:
+            raise ValueError("Kein gespeichertes Klassenbuch-Passwort gefunden.")
+        raise ValueError("Pflichtwerte fehlen: " + ", ".join(missing))
     _ensure_gitignore()
     _ensure_runtime_folders(values)
     lines = [
@@ -236,4 +313,5 @@ def save_setup(payload: SetupPayload) -> dict[str, object]:
         "env_exists": True,
         "setup_required": False,
         "config_public": get_settings().public_dict(),
+        "warnings": warnings,
     }

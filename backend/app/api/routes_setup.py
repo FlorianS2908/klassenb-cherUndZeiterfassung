@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from app.browser.automation_klassenbuch import KlassenbuchLoadError, load_klassenbuecher_overview
 from app.models.schemas import ApiMessage, SetupPayload
 from app.services.setup_service import check_setup as check_setup_state
 from app.services.setup_service import default_setup_values, save_setup, validate_openai_key_file
@@ -36,7 +37,31 @@ def save_setup_payload(payload: SetupPayload):
         data = save_setup(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return ApiMessage(ok=True, message="Setup wurde gespeichert.", data=data)
+    warnings = data.get("warnings") if isinstance(data, dict) else []
+    message = "Setup wurde gespeichert."
+    if warnings:
+        message = f"{message} {warnings[0]}"
+    return ApiMessage(ok=True, message=message, data=data)
+
+
+@router.post("/test-klassenbuch-login")
+async def test_klassenbuch_login():
+    try:
+        result = await load_klassenbuecher_overview()
+    except KlassenbuchLoadError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "ok": False,
+                "message": "Login fehlgeschlagen. Bitte Benutzername und Passwort neu eingeben.",
+                "diagnostics": exc.diagnostics,
+            },
+        ) from exc
+    return ApiMessage(
+        ok=True,
+        message="Login erfolgreich. Klassenbuecher koennen geladen werden.",
+        data={"count": result.get("count", 0), "diagnostics": result.get("diagnostics", {})},
+    )
 
 
 @router.post("/run")

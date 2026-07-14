@@ -131,7 +131,11 @@ export interface SetupDefaults {
   klassenbuch_url: string;
   timebutler_url: string;
   klassenbuch_username: string;
+  klassenbuch_password_present: boolean;
+  klassenbuch_password_source: string;
   timebutler_username: string;
+  timebutler_password_present: boolean;
+  timebutler_password_source: string;
   use_separate_timebutler_credentials: boolean;
   openai_api_key_file: string;
   openai_model: string;

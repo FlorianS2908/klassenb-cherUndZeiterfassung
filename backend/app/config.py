@@ -16,8 +16,10 @@ class Settings(BaseModel):
     timebutler_url: str = "https://app.timebutler.com/do?ha=login&ac=2"
     klassenbuch_username: str = ""
     klassenbuch_password: str = ""
+    klassenbuch_password_source: str = "env"
     timebutler_username: str = ""
     timebutler_password: str = ""
+    timebutler_password_source: str = "env"
     openai_api_key_file: str = r"C:\Users\Florian.Schaffer\OneDrive - Amadeus Fire AG\Desktop\KlassenbuchTimebutler\api_key_klassenbuch.txt"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
@@ -62,6 +64,18 @@ class Settings(BaseModel):
         return self.timebutler_password or self.klassenbuch_password
 
     def public_dict(self) -> dict[str, object]:
+        klassenbuch_secret_present = False
+        timebutler_secret_present = False
+        try:
+            from app.services.secret_store import has_secret
+
+            klassenbuch_secret_present = has_secret("klassenbuch.gfn.de", self.klassenbuch_username)
+            timebutler_secret_present = has_secret("timebutler", self.effective_timebutler_username)
+        except Exception:
+            klassenbuch_secret_present = False
+            timebutler_secret_present = False
+        klassenbuch_password_present = bool(self.klassenbuch_password or klassenbuch_secret_present)
+        timebutler_password_present = bool(self.effective_timebutler_password or timebutler_secret_present)
         return {
             "klassenbuch_url": self.klassenbuch_url,
             "timebutler_url": self.timebutler_url,
@@ -92,6 +106,14 @@ class Settings(BaseModel):
                 "mode": "unsichtbar/headless" if self.browser_headless else "sichtbar/debug",
                 "slow_mo_ms": self.browser_slow_mo_ms,
                 "keep_open_on_error": self.browser_keep_open_on_error,
+            },
+            "credentials": {
+                "klassenbuch_username_present": bool(self.klassenbuch_username),
+                "klassenbuch_password_present": klassenbuch_password_present,
+                "klassenbuch_password_source": self.klassenbuch_password_source if klassenbuch_password_present else "missing",
+                "timebutler_username_present": bool(self.effective_timebutler_username),
+                "timebutler_password_present": timebutler_password_present,
+                "timebutler_password_source": self.timebutler_password_source if timebutler_password_present else "missing",
             },
             "dry_run_forced": self.dry_run_forced,
             "github": {
@@ -137,8 +159,10 @@ def get_settings() -> Settings:
         timebutler_url=env("TIMEBUTLER_URL", "https://app.timebutler.com/do?ha=login&ac=2"),
         klassenbuch_username=env("KLASSENBUCH_USERNAME"),
         klassenbuch_password=env("KLASSENBUCH_PASSWORD"),
+        klassenbuch_password_source=env("KLASSENBUCH_PASSWORD_SOURCE", "env") or "env",
         timebutler_username=env("TIMEBUTLER_USERNAME"),
         timebutler_password=env("TIMEBUTLER_PASSWORD"),
+        timebutler_password_source=env("TIMEBUTLER_PASSWORD_SOURCE", "env") or "env",
         openai_api_key_file=env("OPENAI_API_KEY_FILE", r"C:\Users\Florian.Schaffer\OneDrive - Amadeus Fire AG\Desktop\KlassenbuchTimebutler\api_key_klassenbuch.txt"),
         openai_api_key=env("OPENAI_API_KEY"),
         openai_model=env("OPENAI_MODEL", "gpt-4o-mini") or "gpt-4o-mini",
@@ -190,10 +214,19 @@ def ensure_runtime_ready(run_setup_if_missing: bool = False) -> tuple[bool, list
         "KLASSENBUCH_URL": settings.klassenbuch_url,
         "TIMEBUTLER_URL": settings.timebutler_url,
         "KLASSENBUCH_USERNAME": settings.klassenbuch_username,
-        "KLASSENBUCH_PASSWORD": settings.klassenbuch_password,
     }.items():
         if not value:
             missing.append(key)
+    has_klassenbuch_password = bool(settings.klassenbuch_password)
+    if not has_klassenbuch_password and settings.klassenbuch_password_source == "keyring":
+        try:
+            from app.services.secret_store import has_secret
+
+            has_klassenbuch_password = has_secret("klassenbuch.gfn.de", settings.klassenbuch_username)
+        except Exception:
+            has_klassenbuch_password = False
+    if not has_klassenbuch_password:
+        missing.append("KLASSENBUCH_PASSWORD")
     if missing:
         messages.append("Pflichtwerte fehlen: " + ", ".join(missing))
     for folder in [settings.upload_folder, settings.screenshot_folder, settings.log_folder, settings.error_report_folder, settings.analysis_history_folder]:

@@ -12,3 +12,12 @@ def test_klassenbuch_ui_exposes_diagnostics_and_browser_check():
     assert "playwright-browserstart" in content
     assert "notimplementederror" in content
     assert "Playwright-Python-API-Fehler" in content
+
+
+def test_setup_page_shows_secure_credential_storage_and_login_test():
+    content = (ROOT / "frontend" / "src" / "routes" / "SetupPage.tsx").read_text(encoding="utf-8")
+
+    assert "Windows Credential Manager" in content
+    assert "Klassenbuch Passwort gespeichert" in content
+    assert "Klassenbuch-Login testen" in content
+    assert "testKlassenbuchLogin" in content
