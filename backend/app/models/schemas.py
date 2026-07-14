@@ -107,6 +107,7 @@ class ReviewState(BaseModel):
 
 class SubmitRequest(BaseModel):
     review_confirmed: bool = False
+    signature_confirmed: bool = False
     payload: dict[str, Any] = Field(default_factory=dict)
 
 

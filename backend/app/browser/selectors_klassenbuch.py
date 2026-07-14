@@ -8,6 +8,10 @@ KLASSENBUCH_SELECTORS = {
     "content_fields": ['textarea', 'input[type="text"]', '[contenteditable="true"]'],
     "save_button": ['button:has-text("Speichern")', '[role="button"]:has-text("Speichern")', 'input[value="Speichern"]'],
     "next_button": ['button:has-text("Weiter")', '[role="button"]:has-text("Weiter")', 'a:has-text("Weiter")'],
-    "signature": ['input[name*="sign"]', 'input[placeholder*="Sign"]', 'textarea[name*="sign"]', 'input:near(:text("Signatur"))'],
-    "sign_button": ['button:has-text("Signieren")', 'button:has-text("Abschliessen")', 'button:has-text("Abschließen")'],
+    "signature_page_markers": ['text="Signierung"', 'text="Signatur"', 'text="Unterschrift"', 'text="Vorschau"', 'button:has-text("Signieren")', 'button:has-text("Abschliessen")', 'button:has-text("Abschließen")'],
+    "signature": ['input[name*="sign" i]', 'input[name*="signature" i]', 'input[name*="unterschrift" i]', 'textarea[name*="sign" i]', 'textarea[name*="signature" i]', 'input[placeholder*="Signatur" i]', 'input[placeholder*="Unterschrift" i]', 'textarea[placeholder*="Signatur" i]', 'textarea[placeholder*="Unterschrift" i]', 'input[aria-label*="Signatur" i]', 'textarea[aria-label*="Signatur" i]', 'input:near(:text("Signatur"))', 'textarea:near(:text("Signatur"))', 'input:near(:text("Unterschrift"))', 'textarea:near(:text("Unterschrift"))'],
+    "signature_confirm_checkbox": ['input[type="checkbox"][name*="confirm" i]', 'input[type="checkbox"][name*="bestaet" i]', 'label:has-text("bestätige") input[type="checkbox"]', 'label:has-text("korrekt") input[type="checkbox"]'],
+    "sign_button": ['button:has-text("Speichern und signieren")', '[role="button"]:has-text("Speichern und signieren")', 'button:has-text("Signieren")', '[role="button"]:has-text("Signieren")', 'button:has-text("Abschliessen")', '[role="button"]:has-text("Abschliessen")', 'button:has-text("Abschließen")', '[role="button"]:has-text("Abschließen")', 'input[value*="Signieren"]', 'input[value*="Abschliessen"]', 'input[value*="Abschließen"]'],
+    "signature_success": ['text="signiert"', 'text="abgeschlossen"', 'text="erfolgreich"', 'text="gespeichert"'],
+    "manual_signature_markers": ['text="TAN"', 'text="2FA"', 'text="Zwei-Faktor"', 'text="Zertifikat"', 'text="Smartcard"', 'text="externer Signaturdienst"'],
 }

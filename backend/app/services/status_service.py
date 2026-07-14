@@ -22,6 +22,7 @@ class StatusService:
             ("klassenbuch", "Klassenbuch vorbereiten"),
             ("timebutler", "Zeiterfassung vorbereiten"),
             ("review", "Finale Review"),
+            ("signature", "Klassenbuch signieren"),
         ]
         return [StepStatus(name=name, label=label) for name, label in labels]
 

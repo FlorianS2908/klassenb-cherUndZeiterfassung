@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
+
 from app.browser.base import browser_page, click_first, fill_first, first_visible, optional_click, table_rows
 from app.browser.selectors_klassenbuch import KLASSENBUCH_SELECTORS
 from app.config import get_settings
+from app.models.schemas import StepState
 from app.models.schemas import ApiMessage
 from app.services.screenshot_service import save_page_screenshot
 from app.services.status_service import status_service
@@ -17,6 +20,32 @@ async def _safe_screenshot(page, step: str) -> str:
         return str(await save_page_screenshot(page, _run_id(), step))
     except Exception:
         return ""
+
+
+def _set_signature_step(state: StepState, message: str) -> None:
+    status_service.set_step("signature", state, message)
+
+
+async def _is_any_visible(page, selectors: list[str]) -> bool:
+    for selector in selectors:
+        try:
+            locator = page.locator(selector).first()
+            if await locator.is_visible():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+async def _locator_or_none(page, selectors: list[str]):
+    for selector in selectors:
+        try:
+            locator = page.locator(selector).first()
+            if await locator.is_visible() and await locator.is_enabled():
+                return locator
+        except Exception:
+            continue
+    return None
 
 
 async def _login(page) -> None:
@@ -113,38 +142,146 @@ async def _fill_ue(page, payload: dict) -> None:
     await _safe_screenshot(page, "klassenbuch_ue_filled")
 
 
+async def _save_ue(page) -> None:
+    status_service.set_step("klassenbuch", StepState.running, "Unterrichtseinheiten werden gespeichert.")
+    await click_first(page, KLASSENBUCH_SELECTORS["save_button"], "Speichern")
+    await page.wait_for_load_state("networkidle")
+    status_service.set_step("klassenbuch", StepState.success, "Alle 9 UE wurden gespeichert.")
+
+
+async def _open_signature_step(page) -> None:
+    _set_signature_step(StepState.running, "Signaturseite gesucht.")
+    await optional_click(page, KLASSENBUCH_SELECTORS["next_button"])
+    await page.wait_for_load_state("networkidle")
+    await _safe_screenshot(page, "klassenbuch_signature_page_loaded")
+
+
+async def _guard_manual_signature_challenge(page) -> None:
+    if await _is_any_visible(page, KLASSENBUCH_SELECTORS["manual_signature_markers"]):
+        await _safe_screenshot(page, "klassenbuch_signature_error")
+        _set_signature_step(StepState.manual_review, "Manuelle Signatur erforderlich.")
+        raise RuntimeError("Manuelle Signatur erforderlich: 2FA, TAN, Zertifikat oder externer Signaturdienst erkannt.")
+
+
+async def _recognize_signature_page(page) -> None:
+    await _guard_manual_signature_challenge(page)
+    marker_found = await _is_any_visible(page, KLASSENBUCH_SELECTORS["signature_page_markers"])
+    signature_field = await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature"])
+    sign_button = await _locator_or_none(page, KLASSENBUCH_SELECTORS["sign_button"])
+    if not marker_found or (signature_field is None and sign_button is None):
+        await _safe_screenshot(page, "klassenbuch_signature_error")
+        _set_signature_step(StepState.manual_review, "Signaturseite nicht eindeutig erkannt.")
+        raise RuntimeError("Signaturseite nicht eindeutig erkannt.")
+    _set_signature_step(StepState.success, "Signaturseite erkannt.")
+
+
+async def _fill_signature(page, allow_overwrite: bool) -> None:
+    settings = get_settings()
+    locator = await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature"])
+    if locator is None:
+        await _safe_screenshot(page, "klassenbuch_signature_error")
+        _set_signature_step(StepState.error, "Signaturfeld nicht gefunden.")
+        raise RuntimeError("Signaturfeld nicht gefunden.")
+    current = ""
+    try:
+        current = (await locator.input_value()).strip()
+    except Exception:
+        try:
+            current = (await locator.inner_text()).strip()
+        except Exception:
+            current = ""
+    if current and not allow_overwrite:
+        await _safe_screenshot(page, "klassenbuch_signature_error")
+        _set_signature_step(StepState.manual_review, "Signaturfeld ist bereits befuellt.")
+        raise RuntimeError("Signaturfeld ist bereits befuellt. Im Dry-Run wird nicht ueberschrieben.")
+    _set_signature_step(StepState.running, "Signaturfeld gefunden.")
+    await locator.fill(settings.default_signature)
+    await _safe_screenshot(page, "klassenbuch_signature_filled")
+    _set_signature_step(StepState.success, "Signatur eingetragen.")
+
+
+async def _confirm_signature_checkbox(page) -> None:
+    checkbox = await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature_confirm_checkbox"])
+    if checkbox is not None:
+        try:
+            if not await checkbox.is_checked():
+                await checkbox.check()
+        except Exception:
+            await checkbox.click()
+
+
+async def _finalize_signature(page) -> str:
+    await _guard_manual_signature_challenge(page)
+    _set_signature_step(StepState.running, "Finale Signatur gestartet.")
+    await _confirm_signature_checkbox(page)
+    await click_first(page, KLASSENBUCH_SELECTORS["sign_button"], "Signieren")
+    await page.wait_for_load_state("networkidle")
+    if not await _is_any_visible(page, KLASSENBUCH_SELECTORS["signature_success"]):
+        await _safe_screenshot(page, "klassenbuch_signature_error")
+        _set_signature_step(StepState.error, "Signatur fehlgeschlagen.")
+        raise RuntimeError("Keine eindeutige Erfolgsmeldung nach dem Signieren erkannt.")
+    screenshot = await _safe_screenshot(page, "klassenbuch_signed_success")
+    _set_signature_step(StepState.success, "Klassenbuch signiert.")
+    logging.info("Klassenbuch wurde final signiert.")
+    return screenshot
+
+
+def _validate_signature_submit_allowed(payload: dict, review_confirmed: bool, signature_confirmed: bool) -> str | None:
+    settings = get_settings()
+    if not settings.auto_submit:
+        return "Finales Signieren gesperrt: AUTO_SUBMIT=true ist erforderlich."
+    if not review_confirmed:
+        return "Finales Signieren gesperrt: Review-Bestaetigung erforderlich."
+    if not signature_confirmed:
+        return "Finales Signieren gesperrt: Signatur-Bestaetigung erforderlich."
+    if status_service.status.blocked:
+        return "Finales Signieren gesperrt: Zieltag ist gesperrt."
+    ue_items = payload.get("ue_items") or payload.get("unterrichtseinheiten") or []
+    if len(ue_items) != 9:
+        return "Finales Signieren gesperrt: Es muessen genau 9 UE vorhanden sein."
+    selected = payload.get("klassenbuch") or payload.get("selected_klassenbuch") or {}
+    if selected and str(selected.get("status", "")).lower() != "offen":
+        return "Finales Signieren gesperrt: Klassenbuch ist nicht im Status Offen."
+    return None
+
+
 async def prepare_klassenbuch(payload: dict) -> ApiMessage:
     async with browser_page() as page:
         try:
             await _login(page)
             await _select_entry(page, payload)
             await _fill_ue(page, payload)
-            await optional_click(page, KLASSENBUCH_SELECTORS["next_button"])
-            await page.wait_for_load_state("networkidle")
-            await _safe_screenshot(page, "klassenbuch_signature_opened")
-            await _safe_screenshot(page, "klassenbuch_dry_run_preview")
-            return ApiMessage(ok=True, message="Klassenbuch wurde im Dry-Run vorbereitet. Es wurde nicht signiert oder gespeichert.", data={"payload": payload})
+            await _open_signature_step(page)
+            await _recognize_signature_page(page)
+            try:
+                await _fill_signature(page, allow_overwrite=False)
+            except RuntimeError as exc:
+                if "bereits befuellt" not in str(exc):
+                    raise
+            screenshot = await _safe_screenshot(page, "klassenbuch_signature_dry_run")
+            _set_signature_step(StepState.skipped, "Dry-Run: Signatur vorbereitet, aber nicht abgeschlossen.")
+            return ApiMessage(ok=True, message="Dry-Run: Signatur vorbereitet, aber nicht abgeschlossen.", data={"payload": payload, "screenshot": screenshot})
         except Exception as exc:
-            screenshot = await _safe_screenshot(page, "klassenbuch_error")
+            screenshot = await _safe_screenshot(page, "klassenbuch_signature_error")
             return ApiMessage(ok=False, message=f"Klassenbuch-Dry-Run fehlgeschlagen: {exc}", data={"screenshot": screenshot})
 
 
-async def submit_klassenbuch(payload: dict, review_confirmed: bool) -> ApiMessage:
-    settings = get_settings()
-    if not settings.auto_submit or not review_confirmed:
-        return ApiMessage(ok=False, message="Finales Signieren gesperrt: AUTO_SUBMIT und Review-Bestaetigung erforderlich.")
+async def submit_klassenbuch(payload: dict, review_confirmed: bool, signature_confirmed: bool = False) -> ApiMessage:
+    blocked_reason = _validate_signature_submit_allowed(payload, review_confirmed, signature_confirmed)
+    if blocked_reason:
+        return ApiMessage(ok=False, message=blocked_reason)
     async with browser_page() as page:
         try:
             await _login(page)
             await _select_entry(page, payload)
             await _fill_ue(page, payload)
-            await optional_click(page, KLASSENBUCH_SELECTORS["next_button"])
-            await page.wait_for_load_state("networkidle")
-            await fill_first(page, KLASSENBUCH_SELECTORS["signature"], settings.default_signature, "Signatur")
-            await click_first(page, KLASSENBUCH_SELECTORS["sign_button"], "Signieren")
-            await page.wait_for_load_state("networkidle")
-            screenshot = await _safe_screenshot(page, "klassenbuch_submitted")
+            await _save_ue(page)
+            await _open_signature_step(page)
+            await _recognize_signature_page(page)
+            await _fill_signature(page, allow_overwrite=True)
+            screenshot = await _finalize_signature(page)
             return ApiMessage(ok=True, message="Klassenbuch wurde final signiert.", data={"screenshot": screenshot})
         except Exception as exc:
-            screenshot = await _safe_screenshot(page, "klassenbuch_submit_error")
+            screenshot = await _safe_screenshot(page, "klassenbuch_signature_error")
+            _set_signature_step(StepState.error, "Signatur fehlgeschlagen.")
             return ApiMessage(ok=False, message=f"Klassenbuch-Submit fehlgeschlagen: {exc}", data={"screenshot": screenshot})

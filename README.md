@@ -90,6 +90,8 @@ Review:
 - Finale Aktionen sind ohne Review-Bestaetigung gesperrt.
 - Bei `AUTO_SUBMIT=false` bleiben finale Buttons deaktiviert.
 - Bei `AUTO_SUBMIT=true` muessen alle Validierungen erfolgreich sein.
+- Klassenbuch-Signaturen brauchen zusaetzlich die Signatur-Bestaetigung in der Review-Seite.
+- Bei TAN, 2FA, Zertifikat, Smartcard oder externer Signaturabfrage bricht das Tool ab und verlangt manuelle Signatur.
 
 ## Zieltag Und Sperrtage
 
@@ -127,7 +129,7 @@ Alternative: APScheduler ist im Backend vorbereitet und registriert einen Werkta
 Produktivmodus ist absichtlich zweistufig:
 
 1. In `.env` `AUTO_SUBMIT=true` setzen.
-2. In der UI die finale Review bestaetigen.
+2. In der UI die finale Review und die Signatur-Bestaetigung setzen.
 
 Ohne beide Gates wird nichts gespeichert, signiert oder abgesendet.
 

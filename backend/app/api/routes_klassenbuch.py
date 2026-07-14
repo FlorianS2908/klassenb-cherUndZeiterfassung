@@ -21,4 +21,4 @@ async def prepare(payload: dict):
 
 @router.post("/submit")
 async def submit(request: SubmitRequest):
-    return await submit_klassenbuch(request.payload, request.review_confirmed)
+    return await submit_klassenbuch(request.payload, request.review_confirmed, request.signature_confirmed)
