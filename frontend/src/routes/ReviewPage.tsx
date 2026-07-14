@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { UeEditor } from '../components/UeEditor/UeEditor';
-import { prepareKlassenbuch } from '../services/klassenbuchService';
+import { prepareKlassenbuch, prepareKlassenbuchSignature, submitKlassenbuch } from '../services/klassenbuchService';
+import { getStatus } from '../services/statusService';
 import type { UeItem } from '../types';
 import { normalizeEntries, type WorkflowEntry, type WorkflowState } from '../state/workflowState';
 
@@ -23,27 +24,49 @@ export function ReviewPage({
 }) {
   const [items, setItems] = useState<UeItem[]>(toUeItems(workflow.generatedEntries));
   const [reviewed, setReviewed] = useState(false);
+  const [signatureConfirmed, setSignatureConfirmed] = useState(false);
+  const [autoSubmit, setAutoSubmit] = useState(false);
   const [message, setMessage] = useState('');
   const ready = Boolean(workflow.selectedClassbook && workflow.analysisDone && workflow.generatedEntries.length === 9);
+  const payload = {
+    klassenbuch: workflow.selectedClassbook,
+    classbook: workflow.selectedClassbook,
+    ue_items: items,
+    entries: items,
+    file: workflow.uploadedFile?.name,
+    selected_range: workflow.selectedRange,
+  };
+
+  useEffect(() => {
+    getStatus().then((status) => setAutoSubmit(status.auto_submit)).catch(() => setAutoSubmit(false));
+  }, []);
 
   function updateItems(nextItems: UeItem[]) {
     setItems(nextItems);
     setWorkflow({ generatedEntries: normalizeEntries(nextItems), analysisDone: nextItems.length === 9 });
   }
 
-  async function submitReview() {
+  async function prepareReview() {
     if (!workflow.selectedClassbook || items.length !== 9 || !reviewed) return;
     setMessage('Klassenbuch-Eintrag wird vorbereitet ...');
-    const result = await prepareKlassenbuch({
-      klassenbuch: workflow.selectedClassbook,
-      classbook: workflow.selectedClassbook,
-      ue_items: items,
-      entries: items,
-      file: workflow.uploadedFile?.name,
-      selected_range: workflow.selectedRange,
-      review_confirmed: true,
-    });
+    const result = await prepareKlassenbuch({ ...payload, review_confirmed: true });
     setWorkflow({ generatedEntries: normalizeEntries(items), reviewDone: true, currentStep: 'submit_done' });
+    setMessage(JSON.stringify(result, null, 2));
+  }
+
+  async function prepareSignature() {
+    if (!workflow.selectedClassbook || items.length !== 9 || !reviewed) return;
+    setMessage('Signatur wird vorbereitet ...');
+    const result = await prepareKlassenbuchSignature(payload, reviewed);
+    setWorkflow({ generatedEntries: normalizeEntries(items), reviewDone: true });
+    setMessage(JSON.stringify(result, null, 2));
+  }
+
+  async function finalizeSignature() {
+    if (!workflow.selectedClassbook || items.length !== 9 || !reviewed || !signatureConfirmed || !autoSubmit) return;
+    setMessage('Finale Signatur wird ausgefuehrt ...');
+    const result = await submitKlassenbuch(payload, reviewed, signatureConfirmed);
+    setWorkflow({ generatedEntries: normalizeEntries(items), reviewDone: Boolean((result as { ok?: boolean }).ok), currentStep: 'submit_done' });
     setMessage(JSON.stringify(result, null, 2));
   }
 
@@ -74,11 +97,18 @@ export function ReviewPage({
       <section className="panel">
         <label className="check-row">
           <input type="checkbox" checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} />
-          Ich habe die Eintraege geprueft.
+          Ich habe die 9 UE geprueft.
         </label>
+        <label className="check-row">
+          <input type="checkbox" checked={signatureConfirmed} onChange={(event) => setSignatureConfirmed(event.target.checked)} />
+          Ich bestaetige, dass die Signatur gesetzt und final verwendet werden darf.
+        </label>
+        {!autoSubmit && <div className="banner warning">Final signieren ist deaktiviert, weil AUTO_SUBMIT nicht aktiv ist.</div>}
         <div className="actions">
           <button className="secondary" onClick={() => setPage('analysis')}>Zurueck zur Analyse</button>
-          <button className="primary" disabled={!reviewed || items.length !== 9} onClick={submitReview}>Ins Klassenbuch eintragen</button>
+          <button className="secondary" disabled={!reviewed || items.length !== 9} onClick={prepareReview}>Klassenbuch vorbereiten</button>
+          <button className="secondary" disabled={!reviewed || items.length !== 9} onClick={prepareSignature}>Signatur vorbereiten</button>
+          <button className="primary" disabled={!reviewed || !signatureConfirmed || !autoSubmit || items.length !== 9} onClick={finalizeSignature}>Final signieren</button>
         </div>
         {message && <pre className="output">{message}</pre>}
       </section>

@@ -111,3 +111,22 @@ def test_klassenbuch_login_test_endpoint_uses_payload_without_hard_error(monkeyp
     assert body["ok"] is False
     assert body["data"]["credential_source_used"] == "payload"
     assert "local-secret" not in str(body)
+
+
+def test_prepare_signature_endpoint_forwards_review_gate(monkeypatch):
+    async def fake_prepare_signature(payload, review_confirmed):
+        assert payload == {"ue_items": [1] * 9}
+        assert review_confirmed is True
+        return {"ok": True, "message": "Signatur wurde vorbereitet.", "data": {"canvas_has_ink": True}}
+
+    monkeypatch.setattr(routes_klassenbuch, "prepare_signature_klassenbuch", fake_prepare_signature)
+    app = FastAPI()
+    app.include_router(routes_klassenbuch.router)
+    client = TestClient(app)
+
+    response = client.post("/api/klassenbuch/prepare-signature", json={"payload": {"ue_items": [1] * 9}, "review_confirmed": True})
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["ok"] is True
+    assert body["data"]["canvas_has_ink"] is True

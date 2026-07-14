@@ -84,6 +84,12 @@ def test_guided_klassenbuch_workflow_contracts():
     assert "Zur Review" in analysis
     assert "normalizeEntries" in analysis
     assert "Review noch nicht verfuegbar" in review
-    assert "Ich habe die Eintraege geprueft" in review
-    assert "Ins Klassenbuch eintragen" in review
+    assert "Ich habe die 9 UE geprueft" in review
+    assert "Ich bestaetige, dass die Signatur gesetzt und final verwendet werden darf" in review
+    assert "Klassenbuch vorbereiten" in review
+    assert "Signatur vorbereiten" in review
+    assert "Final signieren" in review
+    assert "prepareKlassenbuchSignature" in review
+    assert "submitKlassenbuch" in review
+    assert "!autoSubmit" in review
     assert "prepareKlassenbuch" in review

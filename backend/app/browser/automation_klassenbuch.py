@@ -1192,14 +1192,32 @@ async def _guard_manual_signature_challenge(page) -> None:
 
 async def _recognize_signature_page(page) -> None:
     await _guard_manual_signature_challenge(page)
-    marker_found = await _is_any_visible(page, KLASSENBUCH_SELECTORS["signature_page_markers"])
     signature_canvas = await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature_canvas"])
+    canvas_visible = False
+    if signature_canvas is not None:
+        try:
+            canvas_visible = await signature_canvas.is_visible()
+        except Exception:
+            canvas_visible = False
+    url_matches = "/classbooks/wizard/new" in page.url.lower()
+    marker_found = await _is_any_visible(page, KLASSENBUCH_SELECTORS["signature_page_markers"])
+    text_found = False
+    for text in ["Signatur", "Signierung", "Bitte hier unterschreiben"]:
+        try:
+            if await page.locator(f"text={text}").first.count() and await page.locator(f"text={text}").first.is_visible():
+                text_found = True
+                break
+        except Exception:
+            continue
     signature_field = await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature"])
     sign_button = await _locator_or_none(page, KLASSENBUCH_SELECTORS["sign_button"])
-    if not marker_found or (signature_canvas is None and signature_field is None and sign_button is None):
+    recognized = url_matches or marker_found or text_found or canvas_visible
+    if not recognized or (not canvas_visible and signature_field is None and sign_button is None):
         await _safe_screenshot(page, "klassenbuch_signature_error")
         _set_signature_step(StepState.manual_review, "Signaturseite nicht eindeutig erkannt.")
         raise RuntimeError("Signaturseite nicht eindeutig erkannt.")
+    if canvas_visible:
+        await _safe_screenshot(page, "signatur_canvas_detected")
     _set_signature_step(StepState.success, "Signaturseite erkannt.")
 
 
@@ -1228,8 +1246,96 @@ def _interpolate_points(points: Sequence[tuple[float, float]], max_step: float =
     return interpolated
 
 
-async def draw_signature_schaffer(page, canvas_locator=None) -> None:
-    canvas = canvas_locator or await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature_canvas"])
+async def _canvas_has_ink(canvas) -> bool:
+    try:
+        return bool(await canvas.evaluate(
+            """node => {
+                const ctx = node.getContext && node.getContext("2d");
+                if (!ctx || !node.width || !node.height) return false;
+                const data = ctx.getImageData(0, 0, node.width, node.height).data;
+                let ink = 0;
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+                    if (a > 0 && r < 240 && g < 240 && b < 240) ink += 1;
+                    if (ink > 100) return true;
+                }
+                return false;
+            }"""
+        ))
+    except Exception:
+        return False
+
+
+async def _canvas_debug_info(canvas) -> dict[str, Any]:
+    info: dict[str, Any] = {"canvas_has_ink": await _canvas_has_ink(canvas)}
+    try:
+        info["bounding_box"] = await canvas.bounding_box()
+    except Exception:
+        info["bounding_box"] = None
+    try:
+        info.update(await canvas.evaluate(
+            """node => {
+                const rect = node.getBoundingClientRect();
+                const style = window.getComputedStyle(node);
+                return {
+                    canvas_width: node.width,
+                    canvas_height: node.height,
+                    css_width: style.width || `${rect.width}px`,
+                    css_height: style.height || `${rect.height}px`
+                };
+            }"""
+        ))
+    except Exception:
+        pass
+    return info
+
+
+async def _notify_signature_pad_changed(page, canvas) -> None:
+    try:
+        await canvas.evaluate(
+            """node => {
+                const rect = node.getBoundingClientRect();
+                const x = rect.left + rect.width * 0.55;
+                const y = rect.top + rect.height * 0.55;
+                for (const type of ["pointerdown", "pointermove", "pointerup", "mouseup"]) {
+                    try {
+                        node.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y, pointerId: 1, pointerType: "mouse" }));
+                    } catch (_) {
+                        node.dispatchEvent(new MouseEvent(type.replace("pointer", "mouse"), { bubbles: true, clientX: x, clientY: y }));
+                    }
+                }
+                node.dispatchEvent(new Event("input", { bubbles: true }));
+                node.dispatchEvent(new Event("change", { bubbles: true }));
+                const dataUrl = node.toDataURL ? node.toDataURL("image/png") : "";
+                if (dataUrl) {
+                    const container = node.closest("#signature-pad, .m-signature-pad, form, body") || document;
+                    const inputs = Array.from(container.querySelectorAll("input[type='hidden'], input:not([type]), textarea"));
+                    for (const input of inputs) {
+                        const marker = `${input.name || ""} ${input.id || ""} ${input.className || ""}`.toLowerCase();
+                        if (marker.includes("signature") || marker.includes("sign") || marker.includes("unterschrift")) {
+                            input.value = dataUrl;
+                            input.dispatchEvent(new Event("input", { bubbles: true }));
+                            input.dispatchEvent(new Event("change", { bubbles: true }));
+                        }
+                    }
+                }
+            }"""
+        )
+    except Exception:
+        pass
+    try:
+        await page.evaluate(
+            """() => {
+                if (window.jQuery) {
+                    try { window.jQuery("#signature-pad canvas").trigger("change"); } catch (_) {}
+                }
+            }"""
+        )
+    except Exception:
+        pass
+
+
+async def _draw_signature_with_mouse(page, canvas) -> bool:
     if canvas is None:
         await _safe_screenshot(page, "signatur_error")
         _set_signature_step(StepState.error, "Signatur-Zeichenflaeche nicht gefunden.")
@@ -1239,34 +1345,98 @@ async def draw_signature_schaffer(page, canvas_locator=None) -> None:
         await _safe_screenshot(page, "signatur_error")
         _set_signature_step(StepState.error, "Signatur-Zeichenflaeche hat keine plausible Groesse.")
         raise RuntimeError("Signatur-Zeichenflaeche hat keine plausible Groesse.")
-    await _safe_screenshot(page, "signatur_canvas_detected")
-    margin_x = box["width"] * 0.08
-    margin_y = box["height"] * 0.18
-    draw_width = box["width"] - margin_x * 2
-    draw_height = box["height"] - margin_y * 2
+    _set_signature_step(StepState.running, "Signatur wird per Mausbewegung gezeichnet.")
+    await _safe_screenshot(page, "signatur_draw_started")
+    margin_x = box["width"] * 0.10
+    top_y = box["height"] * 0.35
+    draw_width = box["width"] * 0.80
+    draw_height = box["height"] * 0.35
     points = _interpolate_points(_signature_points())
     start_x = box["x"] + margin_x + points[0][0] * draw_width
-    start_y = box["y"] + margin_y + points[0][1] * draw_height
+    start_y = box["y"] + top_y + points[0][1] * draw_height
     await page.mouse.move(start_x, start_y)
     await page.mouse.down()
     for point_x, point_y in points[1:]:
-        await page.mouse.move(box["x"] + margin_x + point_x * draw_width, box["y"] + margin_y + point_y * draw_height, steps=2)
+        await page.mouse.move(box["x"] + margin_x + point_x * draw_width, box["y"] + top_y + point_y * draw_height, steps=2)
     await page.mouse.up()
-    await _safe_screenshot(page, "signatur_schaffer_drawn")
+    await _notify_signature_pad_changed(page, canvas)
+    await _safe_screenshot(page, "signatur_mouse_drawn")
+    return await _canvas_has_ink(canvas)
+
+
+async def _draw_signature_direct_canvas(canvas) -> bool:
+    try:
+        await canvas.evaluate(
+            """node => {
+                const ctx = node.getContext && node.getContext("2d");
+                if (!ctx) return;
+                const w = node.width || node.getBoundingClientRect().width;
+                const h = node.height || node.getBoundingClientRect().height;
+                const x = p => w * (0.10 + p[0] * 0.80);
+                const y = p => h * (0.35 + p[1] * 0.35);
+                const points = [
+                    [0.08,0.55],[0.16,0.40],[0.25,0.52],[0.14,0.68],[0.31,0.64],
+                    [0.36,0.46],[0.38,0.64],[0.48,0.67],[0.55,0.50],[0.50,0.67],
+                    [0.62,0.48],[0.70,0.32],[0.68,0.63],[0.79,0.45],[0.82,0.36],
+                    [0.81,0.66],[0.90,0.52],[0.84,0.59],[0.95,0.59]
+                ];
+                ctx.save();
+                ctx.strokeStyle = "#111";
+                ctx.lineWidth = 3;
+                ctx.lineCap = "round";
+                ctx.lineJoin = "round";
+                ctx.beginPath();
+                ctx.moveTo(x(points[0]), y(points[0]));
+                for (const point of points.slice(1)) ctx.lineTo(x(point), y(point));
+                ctx.stroke();
+                ctx.restore();
+                node.dispatchEvent(new Event("input", { bubbles: true }));
+                node.dispatchEvent(new Event("change", { bubbles: true }));
+                node.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+                try { node.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, pointerType: "mouse" })); } catch (_) {}
+            }"""
+        )
+    except Exception:
+        return False
+    return await _canvas_has_ink(canvas)
+
+
+async def draw_signature_schaffer(page, canvas_locator=None) -> None:
+    canvas = canvas_locator or await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature_canvas"])
+    if canvas is None:
+        await _safe_screenshot(page, "signatur_error")
+        _set_signature_step(StepState.error, "Signatur-Zeichenflaeche nicht gefunden.")
+        raise RuntimeError("Signatur-Zeichenflaeche nicht gefunden.")
+    await _safe_screenshot(page, "signatur_canvas_detected")
+    mouse_has_ink = await _draw_signature_with_mouse(page, canvas)
+    if not mouse_has_ink:
+        _set_signature_step(StepState.running, "Mauszeichnung ohne Canvas-Ink, Fallback wird genutzt.")
+        await _safe_screenshot(page, "signatur_direct_canvas_fallback")
+        direct_has_ink = await _draw_signature_direct_canvas(canvas)
+        await _notify_signature_pad_changed(page, canvas)
+        if not direct_has_ink:
+            await _safe_screenshot(page, "signatur_error")
+            _set_signature_step(StepState.error, "Signatur-Canvas wurde nicht beschrieben.")
+            raise RuntimeError("Signatur-Canvas wurde nicht beschrieben.")
+    await _safe_screenshot(page, "signatur_canvas_has_ink")
     _set_signature_step(StepState.success, "Signatur Schaffer wurde eingezeichnet.")
 
 
-async def _fill_signature(page, allow_overwrite: bool, draw_canvas: bool = True) -> None:
+async def _fill_signature(page, allow_overwrite: bool, draw_canvas: bool = True, diag: KlassenbuchDiagnosticsRun | None = None) -> dict[str, Any]:
     if draw_canvas:
         canvas = await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature_canvas"])
         if canvas is not None:
             _set_signature_step(StepState.running, "Signatur-Zeichenflaeche gefunden.")
+            await _diag_step(page, diag, "signatur_canvas_detected", await _canvas_debug_info(canvas))
             await draw_signature_schaffer(page, canvas)
-            return
+            debug_info = await _canvas_debug_info(canvas)
+            await _diag_step(page, diag, "signatur_canvas_has_ink", debug_info)
+            return debug_info
     settings = get_settings()
     locator = await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature"])
     if locator is None:
         await _safe_screenshot(page, "klassenbuch_signature_error")
+        await _diag_step(page, diag, "signatur_error", {"error": "Signaturfeld nicht gefunden.", "canvas_detected": False})
         _set_signature_step(StepState.error, "Signaturfeld nicht gefunden.")
         raise RuntimeError("Signaturfeld nicht gefunden.")
     current = ""
@@ -1279,12 +1449,15 @@ async def _fill_signature(page, allow_overwrite: bool, draw_canvas: bool = True)
             current = ""
     if current and not allow_overwrite:
         await _safe_screenshot(page, "klassenbuch_signature_error")
+        await _diag_step(page, diag, "signatur_error", {"error": "Signaturfeld ist bereits befuellt."})
         _set_signature_step(StepState.manual_review, "Signaturfeld ist bereits befuellt.")
         raise RuntimeError("Signaturfeld ist bereits befuellt. Im Dry-Run wird nicht ueberschrieben.")
     _set_signature_step(StepState.running, "Signaturfeld gefunden.")
     await locator.fill(settings.default_signature)
     await _safe_screenshot(page, "klassenbuch_signature_filled")
+    await _diag_step(page, diag, "signatur_canvas_has_ink", {"canvas_has_ink": False, "text_signature_filled": True})
     _set_signature_step(StepState.success, "Signatur eingetragen.")
+    return {"canvas_has_ink": False, "text_signature_filled": True}
 
 
 async def _confirm_signature_checkbox(page) -> None:
@@ -1297,7 +1470,7 @@ async def _confirm_signature_checkbox(page) -> None:
             await checkbox.click()
 
 
-async def _finalize_signature(page) -> str:
+async def _finalize_signature(page, diag: KlassenbuchDiagnosticsRun | None = None) -> str:
     await _guard_manual_signature_challenge(page)
     _set_signature_step(StepState.running, "Finale Signatur gestartet.")
     await _confirm_signature_checkbox(page)
@@ -1305,10 +1478,12 @@ async def _finalize_signature(page) -> str:
     await page.wait_for_load_state("networkidle")
     if not await _is_any_visible(page, KLASSENBUCH_SELECTORS["signature_success"]):
         await _safe_screenshot(page, "klassenbuch_signature_error")
+        await _diag_step(page, diag, "signatur_error", {"error": "Keine eindeutige Erfolgsmeldung nach dem Signieren erkannt."})
         _set_signature_step(StepState.error, "Signatur fehlgeschlagen.")
         raise RuntimeError("Keine eindeutige Erfolgsmeldung nach dem Signieren erkannt.")
     await _safe_screenshot(page, "signatur_submit_success")
     screenshot = await _safe_screenshot(page, "klassenbuch_signed_success")
+    await _diag_step(page, diag, "signatur_submit_success", {"screenshot_path": screenshot})
     _set_signature_step(StepState.success, "Klassenbuch signiert.")
     logging.info("Klassenbuch wurde final signiert.")
     return screenshot
@@ -1356,22 +1531,99 @@ async def prepare_klassenbuch(payload: dict) -> ApiMessage:
             return ApiMessage(ok=False, message=f"Klassenbuch-Dry-Run fehlgeschlagen: {_exception_message(exc, 'unbekannter Fehler')}", data={"screenshot": screenshot, "diagnostics": summary})
 
 
+async def prepare_signature_klassenbuch(payload: dict, review_confirmed: bool) -> ApiMessage:
+    if not review_confirmed:
+        return ApiMessage(ok=False, message="Signatur-Vorbereitung gesperrt: Review-Bestaetigung erforderlich.")
+    ue_items = payload.get("ue_items") or payload.get("unterrichtseinheiten") or []
+    if len(ue_items) != 9:
+        return ApiMessage(ok=False, message="Signatur-Vorbereitung gesperrt: Es muessen genau 9 UE vorhanden sein.")
+    async with browser_page(storage_state_path=_storage_state_path()) as page:
+        diag = KlassenbuchDiagnosticsRun(_diagnostic_run_id(), "prepare_signature_klassenbuch")
+        _attach_diagnostic_listeners(page, diag)
+        await _start_trace(page, diag)
+        try:
+            await _login(page, diag)
+            await _select_entry(page, payload, diag)
+            await _fill_ue(page, payload, diag)
+            await _save_ue(page)
+            await _open_signature_step(page)
+            await _diag_step(page, diag, "signatur_page_loaded")
+            await _recognize_signature_page(page)
+            canvas_info = await _fill_signature(page, allow_overwrite=True, diag=diag)
+            screenshot = await _safe_screenshot(page, "signatur_ready_for_submit")
+            await _diag_step(page, diag, "signatur_ready_for_submit", {"screenshot_path": screenshot, **canvas_info})
+            await _stop_trace(page, diag)
+            summary = await _write_diagnostic_summary(
+                page,
+                diag,
+                success=True,
+                diagnostics={"screenshot_path": screenshot, **canvas_info},
+            )
+            _set_signature_step(StepState.manual_review, "Signatur wurde vorbereitet. Bitte Review pruefen.")
+            return ApiMessage(
+                ok=True,
+                message="Signatur wurde vorbereitet. Bitte Review pruefen.",
+                data={"screenshot": screenshot, "diagnostics": summary, "canvas_has_ink": bool(canvas_info.get("canvas_has_ink"))},
+            )
+        except Exception as exc:
+            screenshot = await _safe_screenshot(page, "signatur_error")
+            html_snapshot = await _safe_html_snapshot(page, "signatur_error")
+            canvas = await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature_canvas"])
+            canvas_info = await _canvas_debug_info(canvas) if canvas is not None else {"canvas_detected": False, "canvas_has_ink": False}
+            await _diag_step(page, diag, "signatur_error", {"error": _exception_message(exc, "Signatur-Vorbereitung fehlgeschlagen"), "exception_type": type(exc).__name__, **canvas_info})
+            await _stop_trace(page, diag)
+            summary = await _write_diagnostic_summary(
+                page,
+                diag,
+                success=False,
+                error_message=_exception_message(exc, "Signatur-Vorbereitung fehlgeschlagen"),
+                exception_type=type(exc).__name__,
+                diagnostics={"screenshot_path": screenshot, "html_snapshot_path": html_snapshot, **canvas_info},
+            )
+            _set_signature_step(StepState.error, "Signatur-Vorbereitung fehlgeschlagen.")
+            return ApiMessage(
+                ok=False,
+                message=f"Signatur-Vorbereitung fehlgeschlagen: {_exception_message(exc, 'unbekannter Fehler')}",
+                data={"screenshot": screenshot, "diagnostics": summary, "canvas_has_ink": bool(canvas_info.get("canvas_has_ink"))},
+            )
+
+
 async def submit_klassenbuch(payload: dict, review_confirmed: bool, signature_confirmed: bool = False) -> ApiMessage:
     blocked_reason = _validate_signature_submit_allowed(payload, review_confirmed, signature_confirmed)
     if blocked_reason:
         return ApiMessage(ok=False, message=blocked_reason)
     async with browser_page(storage_state_path=_storage_state_path()) as page:
+        diag = KlassenbuchDiagnosticsRun(_diagnostic_run_id(), "submit_klassenbuch")
+        _attach_diagnostic_listeners(page, diag)
+        await _start_trace(page, diag)
         try:
-            await _login(page)
-            await _select_entry(page, payload)
-            await _fill_ue(page, payload)
+            await _login(page, diag)
+            await _select_entry(page, payload, diag)
+            await _fill_ue(page, payload, diag)
             await _save_ue(page)
             await _open_signature_step(page)
+            await _diag_step(page, diag, "signatur_page_loaded")
             await _recognize_signature_page(page)
-            await _fill_signature(page, allow_overwrite=True)
-            screenshot = await _finalize_signature(page)
-            return ApiMessage(ok=True, message="Klassenbuch wurde final signiert.", data={"screenshot": screenshot})
+            canvas_info = await _fill_signature(page, allow_overwrite=True, diag=diag)
+            await _diag_step(page, diag, "signatur_ready_for_submit", canvas_info)
+            screenshot = await _finalize_signature(page, diag)
+            await _stop_trace(page, diag)
+            summary = await _write_diagnostic_summary(page, diag, success=True, diagnostics={"screenshot_path": screenshot, **canvas_info})
+            return ApiMessage(ok=True, message="Klassenbuch wurde final signiert.", data={"screenshot": screenshot, "diagnostics": summary, "canvas_has_ink": bool(canvas_info.get("canvas_has_ink"))})
         except Exception as exc:
             screenshot = await _safe_screenshot(page, "klassenbuch_signature_error")
+            html_snapshot = await _safe_html_snapshot(page, "klassenbuch_signature_error")
+            canvas = await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature_canvas"])
+            canvas_info = await _canvas_debug_info(canvas) if canvas is not None else {"canvas_detected": False, "canvas_has_ink": False}
+            await _diag_step(page, diag, "signatur_error", {"error": _exception_message(exc, "Klassenbuch-Submit fehlgeschlagen"), "exception_type": type(exc).__name__, **canvas_info})
+            await _stop_trace(page, diag)
+            summary = await _write_diagnostic_summary(
+                page,
+                diag,
+                success=False,
+                error_message=_exception_message(exc, "Klassenbuch-Submit fehlgeschlagen"),
+                exception_type=type(exc).__name__,
+                diagnostics={"screenshot_path": screenshot, "html_snapshot_path": html_snapshot, **canvas_info},
+            )
             _set_signature_step(StepState.error, "Signatur fehlgeschlagen.")
-            return ApiMessage(ok=False, message=f"Klassenbuch-Submit fehlgeschlagen: {exc}", data={"screenshot": screenshot})
+            return ApiMessage(ok=False, message=f"Klassenbuch-Submit fehlgeschlagen: {_exception_message(exc, 'unbekannter Fehler')}", data={"screenshot": screenshot, "diagnostics": summary, "canvas_has_ink": bool(canvas_info.get("canvas_has_ink"))})
