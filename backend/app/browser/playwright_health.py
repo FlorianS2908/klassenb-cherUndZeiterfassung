@@ -5,6 +5,8 @@ import sys
 
 from playwright.async_api import async_playwright
 
+from app.config import get_settings
+
 
 def _details() -> dict:
     policy = asyncio.get_event_loop_policy()
@@ -13,6 +15,13 @@ def _details() -> dict:
         loop_name = type(loop).__name__
     except RuntimeError:
         loop_name = ""
+    try:
+        settings = get_settings()
+        browser_headless = settings.browser_headless
+        browser_slow_mo_ms = settings.browser_slow_mo_ms
+    except Exception:
+        browser_headless = True
+        browser_slow_mo_ms = 0
     return {
         "platform": sys.platform,
         "python_version": sys.version,
@@ -20,6 +29,8 @@ def _details() -> dict:
         "event_loop": loop_name,
         "is_windows_proactor_policy": type(policy).__name__ == "WindowsProactorEventLoopPolicy",
         "playwright_importable": True,
+        "browser_headless": browser_headless,
+        "browser_slow_mo_ms": browser_slow_mo_ms,
     }
 
 
@@ -43,7 +54,8 @@ async def check_playwright_health() -> dict:
         except Exception as exc:
             return _failure("playwright_start", exc)
         try:
-            browser = await playwright.chromium.launch(headless=True)
+            settings = get_settings()
+            browser = await playwright.chromium.launch(headless=settings.browser_headless, slow_mo=settings.browser_slow_mo_ms)
         except Exception as exc:
             return _failure("chromium_launch", exc)
         try:
@@ -55,6 +67,11 @@ async def check_playwright_health() -> dict:
             await page.goto("about:blank", wait_until="domcontentloaded")
         except Exception as exc:
             return _failure("goto_blank", exc)
+        try:
+            await page.locator("body").first.count()
+            await page.locator("body").nth(0).count()
+        except Exception as exc:
+            return _failure("locator_api", exc)
         return {"ok": True, "step": "close", "message": "Playwright/Chromium ist startbar.", "exception_type": "", "details": _details()}
     finally:
         if context:

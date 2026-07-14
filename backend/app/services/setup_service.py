@@ -87,6 +87,9 @@ def _payload_to_env(payload: SetupPayload, existing: dict[str, str]) -> dict[str
         "DESKTOP_NOTIFICATIONS": _bool(payload.desktop_notifications),
         "AUTO_OPEN_BROWSER": _bool(payload.auto_open_browser),
         "AUTO_DRY_RUN_ON_START": _bool(payload.auto_dry_run_on_start),
+        "BROWSER_HEADLESS": _bool(payload.browser_headless),
+        "BROWSER_SLOW_MO_MS": str(payload.browser_slow_mo_ms),
+        "BROWSER_KEEP_OPEN_ON_ERROR": _bool(payload.browser_keep_open_on_error),
         "GITHUB_REMOTE_URL": payload.github_remote_url,
         "GIT_DEFAULT_BRANCH": payload.git_default_branch,
     }
@@ -160,6 +163,9 @@ def default_setup_values() -> SetupDefaults:
         desktop_notifications=settings.desktop_notifications,
         auto_open_browser=settings.auto_open_browser,
         auto_dry_run_on_start=settings.auto_dry_run_on_start,
+        browser_headless=settings.browser_headless,
+        browser_slow_mo_ms=settings.browser_slow_mo_ms,
+        browser_keep_open_on_error=settings.browser_keep_open_on_error,
         github_remote_url=settings.github_remote_url,
         git_default_branch=settings.git_default_branch,
     )

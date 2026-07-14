@@ -14,6 +14,8 @@ export interface AppStatus {
   auto_submit: boolean;
   blocked: boolean;
   blocked_reason: string;
+  browser_mode: string;
+  browser_headless: boolean;
   progress: number;
   steps: StepStatus[];
   last_klassenbuch_run: string;
@@ -114,6 +116,7 @@ export interface KlassenbuchDiagnostics {
   tabs?: Record<string, { found?: boolean; row_count?: number; entries_count?: number; error?: string }>;
   probable_cause?: string;
   next_action?: string;
+  problem_category?: string;
 }
 
 export interface KlassenbuchOpenResponse {
@@ -157,6 +160,9 @@ export interface SetupDefaults {
   desktop_notifications: boolean;
   auto_open_browser: boolean;
   auto_dry_run_on_start: boolean;
+  browser_headless: boolean;
+  browser_slow_mo_ms: number;
+  browser_keep_open_on_error: boolean;
   github_remote_url: string;
   git_default_branch: string;
 }

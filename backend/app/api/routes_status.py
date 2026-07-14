@@ -24,6 +24,8 @@ def get_status():
     status_service.status.target_date = target.target_date
     status_service.status.auto_submit = settings.auto_submit and not settings.dry_run_forced
     status_service.status.mode = "dry-run" if settings.dry_run_forced or not settings.auto_submit else "productive"
+    status_service.status.browser_headless = settings.browser_headless
+    status_service.status.browser_mode = "unsichtbar/headless" if settings.browser_headless else "sichtbar/debug"
     status_service.status.blocked = blocked or not target.can_auto_run
     status_service.status.blocked_reason = reason
     return status_service.status

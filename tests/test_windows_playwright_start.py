@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.browser.playwright_health import _details
+from app.config import Settings
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,3 +28,8 @@ def test_browser_health_details_include_eventloop_information():
     assert "python_version" in details
     assert "event_loop_policy" in details
     assert "is_windows_proactor_policy" in details
+
+
+def test_browser_headless_default_is_true():
+    settings = Settings()
+    assert settings.browser_headless is True

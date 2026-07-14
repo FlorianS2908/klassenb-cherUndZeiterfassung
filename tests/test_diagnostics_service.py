@@ -69,3 +69,15 @@ def test_route_error_diagnostic_marks_browser_start_problem(monkeypatch):
         assert summary["login_problem"] is False
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_route_error_diagnostic_marks_locator_api_problem(monkeypatch):
+    tmp_path = _workspace_tmp()
+    monkeypatch.setattr(diagnostics_service, "resolve_project_path", lambda value: tmp_path / value)
+    try:
+        summary = diagnostics_service.write_route_error_diagnostic("klassenbuch", "load_open_klassenbuecher", "login_failed", TypeError("'Locator' object is not callable"))
+        assert summary["problem_category"] == "playwright_python_api"
+        assert ".first()" in summary["next_action"]
+        assert "Locator" in summary["probable_cause"]
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)

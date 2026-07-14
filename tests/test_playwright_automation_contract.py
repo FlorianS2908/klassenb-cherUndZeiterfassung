@@ -1,9 +1,13 @@
 from app.browser.selectors_klassenbuch import KLASSENBUCH_SELECTORS
+from pathlib import Path
 from app.browser.automation_klassenbuch import _extract_edit_action_index, _interpolate_points, _normalize_table_key, _row_to_entry, _signature_points, _validate_signature_submit_allowed
+from app.browser.base import first_locator
 from app.browser.selectors_timebutler import TIMEBUTLER_SELECTORS
 from app.config import get_settings
 from app.services.klassenbuch_service import ensure_open_status
 from app.services.status_service import status_service
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_important_klassenbuch_selectors_have_fallbacks():
@@ -78,3 +82,29 @@ def test_klassenbuch_number_can_be_alphanumeric_in_fallback_parser():
 def test_edit_action_index_is_extracted_from_overview_onclick():
     onclick = "classbookApp.overview.forwardToWizardWithPreselection(12);"
     assert _extract_edit_action_index(onclick) == "12"
+
+
+def test_browser_code_does_not_call_locator_first_as_function():
+    for path in [ROOT / "backend" / "app" / "browser" / "base.py", ROOT / "backend" / "app" / "browser" / "automation_klassenbuch.py"]:
+        assert ".first()" not in path.read_text(encoding="utf-8")
+
+
+def test_first_locator_uses_nth_zero():
+    class LocatorMock:
+        def __init__(self):
+            self.index = None
+
+        def nth(self, index):
+            self.index = index
+            return self
+
+    class ScopeMock:
+        def __init__(self):
+            self.locator_value = LocatorMock()
+
+        def locator(self, selector):
+            return self.locator_value
+
+    scope = ScopeMock()
+    result = first_locator(scope, "body")
+    assert result.index == 0

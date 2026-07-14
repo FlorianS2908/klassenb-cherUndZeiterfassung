@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
-from app.browser.base import browser_page, click_first, fill_first, first_visible, optional_click, table_rows
+from app.browser.base import browser_page, click_first, fill_first, first_locator, first_visible, optional_click, table_rows
 from app.browser.selectors_klassenbuch import KLASSENBUCH_SELECTORS
 from app.config import get_settings, resolve_project_path
 from app.models.schemas import StepState
 from app.models.schemas import ApiMessage
-from app.services.diagnostics_service import append_console_message, append_network_event, create_diagnostic_run, explain_exception, save_step_snapshot, write_steps, write_summary
+from app.services.diagnostics_service import append_console_message, append_network_event, categorize_problem, create_diagnostic_run, explain_exception, save_step_snapshot, write_steps, write_summary
 from app.services.screenshot_service import save_page_screenshot, screenshot_name
 from app.services.status_service import status_service
 
@@ -148,9 +148,13 @@ async def _write_diagnostic_summary(
             pass
 
         _NamedException.__name__ = exception_type
-        fallback_cause, fallback_action = explain_exception(_NamedException(error_message))
+        diagnostic_exception = _NamedException(error_message)
+        fallback_cause, fallback_action = explain_exception(diagnostic_exception)
         probable_cause = probable_cause or fallback_cause
         next_action = next_action or fallback_action
+        problem_context = categorize_problem(diagnostics.get("step", ""), diagnostic_exception)
+    else:
+        problem_context = {}
     summary = {
         "run_id": diag.run_id,
         "module": "klassenbuch",
@@ -178,6 +182,7 @@ async def _write_diagnostic_summary(
         "trace_error": diag.trace_error,
         "probable_cause": probable_cause,
         "next_action": next_action,
+        **problem_context,
         "diagnostics_folder": diag.relative_folder,
         "summary_path": str(diag.run_dir / "summary.json"),
         "steps_path": str(diag.run_dir / "steps.json"),
@@ -199,11 +204,17 @@ async def _safe_screenshot(page, step: str) -> str:
 
 async def save_html_snapshot(page, name: str) -> str:
     try:
+        settings = get_settings()
         folder = resolve_project_path(get_settings().screenshot_folder)
         folder.mkdir(parents=True, exist_ok=True)
         safe_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name)
         path = folder / f"{_run_id()}_{safe_name}.html"
-        path.write_text(await page.content(), encoding="utf-8")
+        html = await page.content()
+        for secret in [settings.klassenbuch_password, settings.timebutler_password]:
+            if secret:
+                html = html.replace(secret, "***")
+        html = re.sub(r'(<input[^>]+type=["\']?password["\']?[^>]*value=)["\'][^"\']*["\']', r'\1"***"', html, flags=re.IGNORECASE)
+        path.write_text(html, encoding="utf-8")
         return str(path)
     except Exception:
         return ""
@@ -246,7 +257,7 @@ def _set_klassenbuch_step(state: StepState, message: str) -> None:
 async def _is_any_visible(page, selectors: list[str]) -> bool:
     for selector in selectors:
         try:
-            locator = page.locator(selector).first()
+            locator = first_locator(page, selector)
             if await locator.is_visible():
                 return True
         except Exception:
@@ -257,7 +268,7 @@ async def _is_any_visible(page, selectors: list[str]) -> bool:
 async def _locator_or_none(page, selectors: list[str]):
     for selector in selectors:
         try:
-            locator = page.locator(selector).first()
+            locator = first_locator(page, selector)
             if await locator.is_visible() and await locator.is_enabled():
                 return locator
         except Exception:
@@ -268,7 +279,7 @@ async def _locator_or_none(page, selectors: list[str]):
 async def _first_visible_in(scope, selectors: list[str]):
     for selector in selectors:
         try:
-            locator = scope.locator(selector).first()
+            locator = first_locator(scope, selector)
             if await locator.is_visible():
                 return locator
         except Exception:
@@ -276,15 +287,90 @@ async def _first_visible_in(scope, selectors: list[str]):
     return None
 
 
+def _storage_state_path() -> Path:
+    return resolve_project_path("runtime/klassenbuch_storage_state.json")
+
+
+async def _save_storage_state(page) -> None:
+    try:
+        path = _storage_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        await page.context.storage_state(path=str(path))
+    except Exception:
+        logging.exception("Klassenbuch storage_state konnte nicht gespeichert werden.")
+
+
+async def _login_error_text(page) -> str:
+    selectors = [
+        ".alert-danger",
+        ".alert-error",
+        ".error",
+        ".invalid-feedback",
+        '[role="alert"]',
+        'text="Login fehlgeschlagen"',
+        'text="Anmeldung fehlgeschlagen"',
+        'text="ungültig"',
+        'text="ungueltig"',
+    ]
+    messages: list[str] = []
+    for selector in selectors:
+        try:
+            locators = page.locator(selector)
+            for index in range(min(await locators.count(), 5)):
+                locator = locators.nth(index)
+                if await locator.is_visible():
+                    text = (await locator.inner_text()).strip()
+                    if text:
+                        messages.append(text)
+        except Exception:
+            continue
+    return " | ".join(dict.fromkeys(messages))
+
+
+async def _wait_for_login_result(page) -> bool:
+    try:
+        await page.wait_for_function(
+            """() => {
+                const text = document.body?.innerText || "";
+                return !location.href.toLowerCase().includes('/login')
+                    || location.href.toLowerCase().includes('/overview')
+                    || text.includes('Übersicht')
+                    || text.includes('Uebersicht')
+                    || text.includes('Themendokumentationen');
+            }""",
+            timeout=10000,
+        )
+    except Exception:
+        pass
+    if "/login" not in page.url.lower():
+        return True
+    return await _is_any_visible(page, KLASSENBUCH_SELECTORS["overview_url_marker"])
+
+
 async def _login(page, diag: KlassenbuchDiagnosticsRun | None = None) -> None:
     settings = get_settings()
     try:
+        if _storage_state_path().exists():
+            await page.goto(_overview_url(), wait_until="domcontentloaded")
+            try:
+                await page.wait_for_load_state("networkidle", timeout=5000)
+            except Exception:
+                pass
+            if "/login" not in page.url.lower() and await _is_any_visible(page, KLASSENBUCH_SELECTORS["overview_url_marker"]):
+                await _safe_screenshot(page, "klassenbuch_session_reused")
+                await _diag_step(page, diag, "session_reused")
+                if diag:
+                    diag.login_success = True
+                    diag.overview_loaded = True
+                return
+            await _diag_step(page, diag, "session_expired")
         await page.goto(settings.klassenbuch_url, wait_until="domcontentloaded")
         await _safe_screenshot(page, "klassenbuch_login_loaded")
         await _diag_step(page, diag, "login_loaded")
         if "/login" not in page.url.lower():
             await _safe_screenshot(page, "klassenbuch_login_success")
             await _diag_step(page, diag, "login_success")
+            await _save_storage_state(page)
             if diag:
                 diag.login_success = True
             return
@@ -293,16 +379,23 @@ async def _login(page, diag: KlassenbuchDiagnosticsRun | None = None) -> None:
         await click_first(page, KLASSENBUCH_SELECTORS["login_button"], "Anmelden")
         await _diag_step(page, diag, "login_submitted")
         try:
-            await page.wait_for_function("() => !location.href.toLowerCase().includes('/login')", timeout=10000)
+            login_ok = await _wait_for_login_result(page)
         except Exception:
-            if "/login" in page.url.lower():
-                await _raise_load_error(page, "login_failed", "Login ins Klassenbuch fehlgeschlagen")
+            login_ok = False
+        if not login_ok:
+            login_message = await _login_error_text(page)
+            detail = "Login ins Klassenbuch fehlgeschlagen"
+            if login_message:
+                detail = f"{detail}: {login_message}"
+            await _diag_step(page, diag, "login_failed", {"login_error": login_message})
+            await _raise_load_error(page, "login_failed", detail)
         try:
             await page.wait_for_load_state("networkidle", timeout=5000)
         except Exception:
             pass
         await _safe_screenshot(page, "klassenbuch_login_success")
         await _diag_step(page, diag, "login_success")
+        await _save_storage_state(page)
         if diag:
             diag.login_success = True
     except KlassenbuchLoadError:
@@ -392,9 +485,9 @@ async def read_table_headers(page) -> dict[str, int]:
         return {}
     header_cells = table.locator("thead th")
     if not await header_cells.count():
-        header_cells = table.locator("tr").first().locator("th")
+        header_cells = first_locator(table, "tr").locator("th")
     if not await header_cells.count():
-        header_cells = table.locator("tr").first().locator("td")
+        header_cells = first_locator(table, "tr").locator("td")
     headers: dict[str, int] = {}
     for index in range(await header_cells.count()):
         text = (await header_cells.nth(index).inner_text()).strip()
@@ -430,7 +523,7 @@ def _extract_edit_action_index(onclick: str) -> str:
 async def _row_edit_action(row) -> tuple[bool, str, str, str]:
     for selector in KLASSENBUCH_SELECTORS["edit_button"]:
         try:
-            locator = row.locator(selector).first()
+            locator = first_locator(row, selector)
             if await locator.count() and await locator.is_visible():
                 href = ""
                 onclick = ""
@@ -444,7 +537,7 @@ async def _row_edit_action(row) -> tuple[bool, str, str, str]:
                     onclick = ""
                 if not href:
                     try:
-                        parent_link = locator.locator("xpath=ancestor-or-self::a[1]").first()
+                        parent_link = first_locator(locator, "xpath=ancestor-or-self::a[1]")
                         href = await parent_link.get_attribute("href") or ""
                         onclick = onclick or await parent_link.get_attribute("onclick") or ""
                     except Exception:
@@ -634,7 +727,7 @@ async def load_klassenbuecher_overview() -> dict:
     diag = KlassenbuchDiagnosticsRun(_diagnostic_run_id(), "load_open_klassenbuecher")
     page = None
     try:
-        async with browser_page() as page:
+        async with browser_page(storage_state_path=_storage_state_path()) as page:
             _attach_diagnostic_listeners(page, diag)
             await _start_trace(page, diag)
             try:
@@ -757,7 +850,7 @@ async def _select_entry(page, payload: dict, diag: KlassenbuchDiagnosticsRun | N
     if "offen" not in row_text:
         raise RuntimeError("Klassenbuch ist nicht im Status Offen.")
     for selector in KLASSENBUCH_SELECTORS["edit_button"]:
-        candidate = row.locator(selector).first()
+        candidate = first_locator(row, selector)
         try:
             if await candidate.is_visible() and await candidate.is_enabled():
                 await candidate.click()
@@ -777,13 +870,13 @@ async def _open_selected_entry_from_overview(page, selected: dict, diag: Klassen
     key = _tab_key(tab_name)
     await _click_overview_tab(page, key, tab_name, diag)
     row_index = str(selected.get("row_index"))
-    row = page.locator(f'tr[data-index="{row_index}"]').first()
+    row = first_locator(page, f'tr[data-index="{row_index}"]')
     if not await row.count():
         diagnostics = await _failure_diagnostics(page, "wizard_open")
         raise KlassenbuchLoadError(f'Klassenbuch-Zeile mit data-index="{row_index}" wurde nicht gefunden.', diagnostics)
     for selector in KLASSENBUCH_SELECTORS["edit_button"]:
         try:
-            button = row.locator(selector).first()
+            button = first_locator(row, selector)
             if await button.count() and await button.is_visible() and await button.is_enabled():
                 await button.click()
                 try:
@@ -907,12 +1000,12 @@ async def _visible_locators(page, selectors: Sequence[str]) -> list:
 
 
 async def _teaching_format_control_for_row(page, row_index: int):
-    textarea = page.locator(f'textarea[name="classBookEntry-{row_index}"]').first()
+    textarea = first_locator(page, f'textarea[name="classBookEntry-{row_index}"]')
     if not await textarea.count():
-        textarea = page.locator(f"#classBookEntry-{row_index}").first()
+        textarea = first_locator(page, f"#classBookEntry-{row_index}")
     try:
         if await textarea.count() and await textarea.is_visible():
-            row = textarea.locator("xpath=ancestor::tr[1]").first()
+            row = first_locator(textarea, "xpath=ancestor::tr[1]")
             if await row.count():
                 for selector in ['div[id^="classBookEntry2-"]', '[data-target="#id-modal-lessons"]', '[data-toggle="modal"]', ".ueEntryButtonGroup button", ".input-group-addon.ueEntryButtonGroup button", "button", '[role="button"]']:
                     controls = row.locator(selector)
@@ -920,9 +1013,9 @@ async def _teaching_format_control_for_row(page, row_index: int):
                         control = controls.nth(control_index)
                         if await control.is_visible() and await control.is_enabled():
                             return control
-            container = textarea.locator("xpath=ancestor::*[contains(@class, 'input-group')][1]").first()
+            container = first_locator(textarea, "xpath=ancestor::*[contains(@class, 'input-group')][1]")
             if await container.count():
-                control = container.locator('div[id^="classBookEntry2-"], [data-target="#id-modal-lessons"], [data-toggle="modal"], .ueEntryButtonGroup button, button').first()
+                control = first_locator(container, 'div[id^="classBookEntry2-"], [data-target="#id-modal-lessons"], [data-toggle="modal"], .ueEntryButtonGroup button, button')
                 if await control.count() and await control.is_visible() and await control.is_enabled():
                     return control
     except Exception:
@@ -959,22 +1052,22 @@ async def open_teaching_format_modal(page, row_index: int, diag: KlassenbuchDiag
 async def _checkbox_for_label(scope, label_variants: Sequence[str]):
     for label in label_variants:
         try:
-            checkbox = scope.get_by_label(re.compile(re.escape(label), re.IGNORECASE)).first()
+            checkbox = scope.get_by_label(re.compile(re.escape(label), re.IGNORECASE)).nth(0)
             if await checkbox.is_visible() and await checkbox.is_enabled():
                 return checkbox
         except Exception:
             pass
         try:
-            label_locator = scope.locator("label").filter(has_text=re.compile(re.escape(label), re.IGNORECASE)).first()
+            label_locator = scope.locator("label").filter(has_text=re.compile(re.escape(label), re.IGNORECASE)).nth(0)
             if await label_locator.is_visible():
-                nested = label_locator.locator('input[type="checkbox"]').first()
+                nested = first_locator(label_locator, 'input[type="checkbox"]')
                 if await nested.count() and await nested.is_enabled():
                     return nested
                 return label_locator
         except Exception:
             pass
         try:
-            checkbox = scope.locator(f'input[type="checkbox"]:near(:text("{label}"))').first()
+            checkbox = first_locator(scope, f'input[type="checkbox"]:near(:text("{label}"))')
             if await checkbox.is_visible() and await checkbox.is_enabled():
                 return checkbox
         except Exception:
@@ -1216,7 +1309,7 @@ def _validate_signature_submit_allowed(payload: dict, review_confirmed: bool, si
 
 
 async def prepare_klassenbuch(payload: dict) -> ApiMessage:
-    async with browser_page() as page:
+    async with browser_page(storage_state_path=_storage_state_path()) as page:
         diag = KlassenbuchDiagnosticsRun(_diagnostic_run_id(), "prepare_klassenbuch")
         _attach_diagnostic_listeners(page, diag)
         await _start_trace(page, diag)
@@ -1242,7 +1335,7 @@ async def submit_klassenbuch(payload: dict, review_confirmed: bool, signature_co
     blocked_reason = _validate_signature_submit_allowed(payload, review_confirmed, signature_confirmed)
     if blocked_reason:
         return ApiMessage(ok=False, message=blocked_reason)
-    async with browser_page() as page:
+    async with browser_page(storage_state_path=_storage_state_path()) as page:
         try:
             await _login(page)
             await _select_entry(page, payload)

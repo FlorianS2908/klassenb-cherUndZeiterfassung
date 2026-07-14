@@ -32,6 +32,8 @@ class AppStatus(BaseModel):
     auto_submit: bool = False
     blocked: bool = False
     blocked_reason: str = ""
+    browser_mode: str = "unsichtbar/headless"
+    browser_headless: bool = True
     progress: int = 0
     steps: list[StepStatus] = Field(default_factory=list)
     last_klassenbuch_run: str = "-"
@@ -144,6 +146,9 @@ class SetupDefaults(BaseModel):
     desktop_notifications: bool = True
     auto_open_browser: bool = True
     auto_dry_run_on_start: bool = False
+    browser_headless: bool = True
+    browser_slow_mo_ms: int = 0
+    browser_keep_open_on_error: bool = False
     github_remote_url: str = ""
     git_default_branch: str = "main"
 

@@ -32,6 +32,11 @@ def diagnostic_run_id() -> str:
 
 
 def explain_exception(exc: Exception) -> tuple[str, str]:
+    if "locator" in str(exc).lower() and "not callable" in str(exc).lower():
+        return (
+            "Im Python-Code wurde ein Playwright Locator wie eine Funktion aufgerufen. Wahrscheinlich .first() statt .first oder .nth(0).",
+            "Alle Playwright-Locator-Aufrufe mit .first() korrigieren.",
+        )
     if type(exc).__name__ == "NotImplementedError" or "NotImplementedError" in str(exc):
         return (
             "Playwright/Chromium konnte nicht gestartet werden. Der Fehler trat vor dem Oeffnen der Klassenbuch-Webseite auf.",
@@ -42,7 +47,9 @@ def explain_exception(exc: Exception) -> tuple[str, str]:
 
 def categorize_problem(step: str, exc: Exception | None = None) -> dict[str, Any]:
     text = f"{step} {type(exc).__name__ if exc else ''} {str(exc) if exc else ''}".lower()
-    if "browser" in text or "playwright" in text or "chromium" in text or "notimplementederror" in text:
+    if "locator" in text and "not callable" in text:
+        category = "playwright_python_api"
+    elif "browser" in text or "playwright" in text or "chromium" in text or "notimplementederror" in text:
         category = "browser_start"
     elif "login" in text:
         category = "login"

@@ -46,6 +46,9 @@ class Settings(BaseModel):
     desktop_notifications: bool = True
     auto_open_browser: bool = True
     auto_dry_run_on_start: bool = False
+    browser_headless: bool = True
+    browser_slow_mo_ms: int = 0
+    browser_keep_open_on_error: bool = False
     github_remote_url: str = "https://github.com/FlorianS2908/klassenb-cherUndZeiterfassung.git"
     git_default_branch: str = "main"
     dry_run_forced: bool = Field(default_factory=lambda: os.getenv("FORCE_DRY_RUN", "").lower() == "true")
@@ -84,6 +87,12 @@ class Settings(BaseModel):
             "desktop_notifications": self.desktop_notifications,
             "auto_open_browser": self.auto_open_browser,
             "auto_dry_run_on_start": self.auto_dry_run_on_start,
+            "browser": {
+                "headless": self.browser_headless,
+                "mode": "unsichtbar/headless" if self.browser_headless else "sichtbar/debug",
+                "slow_mo_ms": self.browser_slow_mo_ms,
+                "keep_open_on_error": self.browser_keep_open_on_error,
+            },
             "dry_run_forced": self.dry_run_forced,
             "github": {
                 "remote_url": self.github_remote_url,
@@ -158,6 +167,9 @@ def get_settings() -> Settings:
         desktop_notifications=env_bool("DESKTOP_NOTIFICATIONS", True),
         auto_open_browser=env_bool("AUTO_OPEN_BROWSER", True),
         auto_dry_run_on_start=env_bool("AUTO_DRY_RUN_ON_START", False),
+        browser_headless=env_bool("BROWSER_HEADLESS", True),
+        browser_slow_mo_ms=env_int("BROWSER_SLOW_MO_MS", 0),
+        browser_keep_open_on_error=env_bool("BROWSER_KEEP_OPEN_ON_ERROR", False),
         github_remote_url=env("GITHUB_REMOTE_URL", "https://github.com/FlorianS2908/klassenb-cherUndZeiterfassung.git"),
         git_default_branch=env("GIT_DEFAULT_BRANCH", "main"),
     )

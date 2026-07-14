@@ -7,7 +7,8 @@ import { analyzeFile, getOpenAiStatus, previewRange, uploadFile } from '../servi
 import { saveAnalysisHistory } from '../services/analysisHistoryService';
 import { checkKlassenbuchBrowserHealth, diagnosticFileUrl, getLatestKlassenbuchDiagnostics } from '../services/diagnosticsService';
 import { getOpenKlassenbuecher, prepareKlassenbuch } from '../services/klassenbuchService';
-import type { AnalysisResult, KlassenbuchDiagnostics, KlassenbuchEntry, UeItem, UploadedFileInfo } from '../types';
+import { getStatus } from '../services/statusService';
+import type { AnalysisResult, AppStatus, KlassenbuchDiagnostics, KlassenbuchEntry, UeItem, UploadedFileInfo } from '../types';
 import { ApiError } from '../services/api';
 
 const KLASSENBUCH_GROUPS = [
@@ -83,6 +84,11 @@ function isBrowserStartProblem(diagnostics: KlassenbuchDiagnostics) {
     || text.includes('chromium konnte nicht gestartet');
 }
 
+function isPlaywrightPythonApiProblem(diagnostics: KlassenbuchDiagnostics) {
+  const text = [diagnostics.problem_category, diagnostics.error_message, diagnostics.message, diagnostics.probable_cause].join(' ').toLowerCase();
+  return text.includes('playwright_python_api') || (text.includes('locator') && text.includes('not callable'));
+}
+
 function DiagnosticStatusCards({ diagnostics }: { diagnostics: KlassenbuchDiagnostics }) {
   const tabsFound = diagnostics.tabs ? Object.values(diagnostics.tabs).filter((tab) => tab.found).length : undefined;
   const cards = [
@@ -105,6 +111,7 @@ export function KlassenbuchPage() {
   const [items, setItems] = useState<UeItem[]>([]);
   const [message, setMessage] = useState('');
   const [openAi, setOpenAi] = useState<{ active: boolean; key_present: boolean; source: string; message: string; display_path: string; model: string; max_input_chars: number } | null>(null);
+  const [appStatus, setAppStatus] = useState<AppStatus | null>(null);
   const [openBooks, setOpenBooks] = useState<KlassenbuchEntry[]>([]);
   const [bookGroups, setBookGroups] = useState<Record<string, KlassenbuchEntry[]>>(groupKlassenbuecher([]));
   const [bookDiagnostics, setBookDiagnostics] = useState<KlassenbuchDiagnostics | null>(null);
@@ -116,6 +123,7 @@ export function KlassenbuchPage() {
 
   useEffect(() => {
     getOpenAiStatus().then(setOpenAi);
+    getStatus().then(setAppStatus).catch(() => undefined);
     getLatestKlassenbuchDiagnostics().then((result) => setLatestDiagnostics(result as KlassenbuchDiagnostics)).catch(() => undefined);
   }, []);
 
@@ -211,6 +219,7 @@ export function KlassenbuchPage() {
           <div><span>API-Key vorhanden</span><strong>{openAi?.key_present ? 'ja' : 'nein'}</strong></div>
           <div><span>Quelle</span><strong>{openAi?.source ?? '-'}</strong></div>
           <div><span>Modell</span><strong>{openAi?.model ?? '-'}</strong></div>
+          <div><span>Browser-Modus</span><strong>{appStatus?.browser_mode ?? '-'}</strong></div>
         </div>
         {openAi && !openAi.active && <div className="banner warning">{openAi.message}</div>}
         {openAi?.display_path && <p className="muted">Key-Datei: {openAi.display_path}</p>}
@@ -331,6 +340,12 @@ export function KlassenbuchPage() {
                 <h3>Browser konnte nicht gestartet werden</h3>
                 <p>Der Fehler ist vor dem Oeffnen der Klassenbuch-Webseite aufgetreten. Es liegt sehr wahrscheinlich an Playwright/Chromium oder am Windows-Eventloop, nicht an den Klassenbuch-Selektoren.</p>
                 <p>Naechste Schritte: KlassenbuchTool_starten.bat erneut starten, Playwright-Installation pruefen, ggf. python -m playwright install ausfuehren und Browser-Check erneut starten.</p>
+              </div>
+            )}
+            {isPlaywrightPythonApiProblem(latestDiagnostics) && (
+              <div className="banner warning">
+                <h3>Playwright-Python-API-Fehler</h3>
+                <p>Der Browser wurde geoeffnet und die Loginseite wurde erreicht. Der Fehler liegt im Code beim Suchen, Klicken oder Fuellen von Elementen. Ursache ist wahrscheinlich .first() statt .first/.nth(0).</p>
               </div>
             )}
             <p><strong>Letzter Klassenbuch-Lauf:</strong> {latestDiagnostics.run_id}</p>

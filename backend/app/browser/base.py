@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 import asyncio
 import sys
 
 from playwright.async_api import Browser, BrowserContext, Locator, Page, async_playwright
+
+from app.config import get_settings
 
 
 def _browser_start_context() -> str:
@@ -19,9 +22,13 @@ def _browser_start_context() -> str:
     )
 
 
+def first_locator(scope, selector: str):
+    return scope.locator(selector).nth(0)
+
+
 async def first_visible(page: Page, selectors: list[str]):
     for selector in selectors:
-        locator = page.locator(selector).first()
+        locator = first_locator(page, selector)
         try:
             if await locator.is_visible() and await locator.is_enabled():
                 return locator
@@ -64,7 +71,7 @@ async def optional_click(page: Page, selectors: list[str]) -> bool:
 
 
 @asynccontextmanager
-async def browser_page() -> AsyncIterator[Page]:
+async def browser_page(storage_state_path: Path | str | None = None) -> AsyncIterator[Page]:
     try:
         playwright = await async_playwright().start()
     except NotImplementedError as exc:
@@ -75,12 +82,24 @@ async def browser_page() -> AsyncIterator[Page]:
     context: BrowserContext | None = None
     try:
         try:
-            browser = await playwright.chromium.launch(headless=False)
+            try:
+                settings = get_settings()
+                headless = settings.browser_headless
+                slow_mo = settings.browser_slow_mo_ms
+            except Exception:
+                headless = True
+                slow_mo = 0
+            browser = await playwright.chromium.launch(headless=headless, slow_mo=slow_mo)
         except NotImplementedError as exc:
             raise RuntimeError(f"Playwright-Browserstart fehlgeschlagen: NotImplementedError. {_browser_start_context()}") from exc
         except Exception as exc:
             raise RuntimeError("Chromium konnte nicht gestartet werden. Bitte python -m playwright install ausfuehren.") from exc
-        context = await browser.new_context(viewport={"width": 1440, "height": 1000})
+        context_options: dict[str, object] = {"viewport": {"width": 1440, "height": 1000}}
+        if storage_state_path:
+            path = Path(storage_state_path)
+            if path.exists():
+                context_options["storage_state"] = str(path)
+        context = await browser.new_context(**context_options)
         page = await context.new_page()
         page.set_default_timeout(15000)
         yield page

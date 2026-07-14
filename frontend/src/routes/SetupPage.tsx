@@ -39,6 +39,9 @@ const emptyPayload: SetupPayload = {
   desktop_notifications: true,
   auto_open_browser: true,
   auto_dry_run_on_start: false,
+  browser_headless: true,
+  browser_slow_mo_ms: 0,
+  browser_keep_open_on_error: false,
   github_remote_url: '',
   git_default_branch: 'main',
 };
@@ -276,6 +279,19 @@ export function SetupPage({ setPage }: Props) {
           <label className="checkline">
             <input type="checkbox" checked={form.desktop_notifications} onChange={(event) => setValue('desktop_notifications', event.target.checked)} />
             Desktop-Benachrichtigungen
+          </label>
+          <label className="checkline wide">
+            <input type="checkbox" checked={!form.browser_headless} onChange={(event) => setValue('browser_headless', !event.target.checked)} />
+            Browser sichtbar anzeigen (Debug-Modus)
+          </label>
+          <p className="wide muted">Im normalen Betrieb laeuft der Browser unsichtbar. Fuer Fehlersuche kann der sichtbare Debug-Modus aktiviert werden.</p>
+          <label className="field">
+            Browser Slow-Mo ms
+            <input type="number" value={form.browser_slow_mo_ms} onChange={(event) => setValue('browser_slow_mo_ms', Number(event.target.value))} />
+          </label>
+          <label className="checkline">
+            <input type="checkbox" checked={form.browser_keep_open_on_error} onChange={(event) => setValue('browser_keep_open_on_error', event.target.checked)} />
+            Browser bei Fehler offen halten
           </label>
           <label className="checkline">
             <input type="checkbox" checked={form.auto_submit} onChange={(event) => setValue('auto_submit', event.target.checked)} />
