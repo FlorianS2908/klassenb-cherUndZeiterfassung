@@ -141,7 +141,7 @@ if not exist ".tools" mkdir ".tools"
 (
   echo @echo off
   echo cd /d "%~dp0backend"
-  echo ..\.venv\Scripts\python.exe -m app.main
+  echo ..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
   echo echo.
   echo echo Backend-Fenster bleibt zur Fehleranalyse offen.
   echo pause

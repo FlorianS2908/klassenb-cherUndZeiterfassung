@@ -2,8 +2,21 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
+import asyncio
+import sys
 
 from playwright.async_api import Browser, BrowserContext, Locator, Page, async_playwright
+
+
+def _browser_start_context() -> str:
+    policy = type(asyncio.get_event_loop_policy()).__name__
+    platform = "Windows" if sys.platform.startswith("win") else sys.platform
+    return (
+        f"Plattform: {platform}. EventloopPolicy: {policy}. "
+        "Wahrscheinlich wird Playwright unter einem nicht subprocess-faehigen Eventloop gestartet. "
+        "Bitte Uvicorn ohne reload starten, sitecustomize.py laden lassen, WindowsProactorEventLoopPolicy vor dem Start setzen "
+        "und python -m playwright install ausfuehren."
+    )
 
 
 async def first_visible(page: Page, selectors: list[str]):
@@ -55,7 +68,7 @@ async def browser_page() -> AsyncIterator[Page]:
     try:
         playwright = await async_playwright().start()
     except NotImplementedError as exc:
-        raise RuntimeError("Playwright-Browserstart fehlgeschlagen: NotImplementedError. Wahrscheinlich Windows asyncio Eventloop/Subprocess-Problem.") from exc
+        raise RuntimeError(f"Playwright-Browserstart fehlgeschlagen: NotImplementedError. {_browser_start_context()}") from exc
     except Exception as exc:
         raise RuntimeError("Playwright konnte nicht gestartet werden. Bitte Playwright installieren und Windows-Eventloop pruefen.") from exc
     browser: Browser | None = None
@@ -64,7 +77,7 @@ async def browser_page() -> AsyncIterator[Page]:
         try:
             browser = await playwright.chromium.launch(headless=False)
         except NotImplementedError as exc:
-            raise RuntimeError("Playwright-Browserstart fehlgeschlagen: NotImplementedError. Wahrscheinlich Windows asyncio Eventloop/Subprocess-Problem.") from exc
+            raise RuntimeError(f"Playwright-Browserstart fehlgeschlagen: NotImplementedError. {_browser_start_context()}") from exc
         except Exception as exc:
             raise RuntimeError("Chromium konnte nicht gestartet werden. Bitte python -m playwright install ausfuehren.") from exc
         context = await browser.new_context(viewport={"width": 1440, "height": 1000})

@@ -143,6 +143,22 @@ Fehlerberichte enthalten Status, Logs und Screenshots, aber keine Passwoerter, A
 - Ungueltiger Bereich: Syntax wie `1-5, 8, 10-12` verwenden.
 - Produktivbutton deaktiviert: `AUTO_SUBMIT`, Review, Sperrtage und Validierungen pruefen.
 
+### Playwright startet auf Windows nicht
+
+Wenn die Diagnose `Playwright-Browserstart fehlgeschlagen` oder `NotImplementedError` meldet:
+
+1. Tool schliessen.
+2. `KlassenbuchTool_starten.bat` neu starten.
+3. Sicherstellen, dass das Backend ohne Uvicorn `reload` laeuft.
+4. In der aktivierten `.venv` ausfuehren:
+
+```bat
+python -m playwright install
+```
+
+5. In der UI den Browser-Check ausfuehren.
+6. Falls weiterhin Fehler auftreten: `diagnostics/klassenbuch/<RUN_ID>/summary.json` pruefen.
+
 ## Wiederholbare Analyse
 
 Die gleiche Datei kann mehrfach mit verschiedenen Bereichen analysiert werden, zum Beispiel heute Folien `5-10` und morgen Folien `11-18`. Jeder Lauf wird als eigener Eintrag in der Analysehistorie gespeichert und kann dort wieder geoeffnet werden.

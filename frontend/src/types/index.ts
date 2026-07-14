@@ -107,6 +107,7 @@ export interface KlassenbuchDiagnostics {
   exception_type?: string;
   entries_returned?: number;
   error_message?: string;
+  message?: string;
   success?: boolean;
   login_success?: boolean;
   overview_loaded?: boolean;

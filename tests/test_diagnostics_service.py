@@ -54,3 +54,18 @@ def test_route_error_diagnostic_writes_summary_without_page(monkeypatch):
         assert Path(summary["steps_path"]).exists()
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_route_error_diagnostic_marks_browser_start_problem(monkeypatch):
+    tmp_path = _workspace_tmp()
+    monkeypatch.setattr(diagnostics_service, "resolve_project_path", lambda value: tmp_path / value)
+    try:
+        summary = diagnostics_service.write_route_error_diagnostic("klassenbuch", "load_open_klassenbuecher", "route_open_books", RuntimeError("Playwright-Browserstart fehlgeschlagen: NotImplementedError"))
+        assert summary["problem_category"] == "browser_start"
+        assert summary["playwright_started"] is False
+        assert summary["chromium_started"] is False
+        assert summary["website_reached"] is False
+        assert summary["selector_problem"] is False
+        assert summary["login_problem"] is False
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)

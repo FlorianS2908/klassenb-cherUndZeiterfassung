@@ -1,6 +1,26 @@
 from __future__ import annotations
 
+import asyncio
+import sys
+
 from playwright.async_api import async_playwright
+
+
+def _details() -> dict:
+    policy = asyncio.get_event_loop_policy()
+    try:
+        loop = asyncio.get_running_loop()
+        loop_name = type(loop).__name__
+    except RuntimeError:
+        loop_name = ""
+    return {
+        "platform": sys.platform,
+        "python_version": sys.version,
+        "event_loop_policy": type(policy).__name__,
+        "event_loop": loop_name,
+        "is_windows_proactor_policy": type(policy).__name__ == "WindowsProactorEventLoopPolicy",
+        "playwright_importable": True,
+    }
 
 
 def _failure(step: str, exc: Exception) -> dict:
@@ -9,7 +29,7 @@ def _failure(step: str, exc: Exception) -> dict:
         "step": step,
         "message": str(exc).strip() or f"unbekannter Fehler ({type(exc).__name__})",
         "exception_type": type(exc).__name__,
-        "details": {},
+        "details": _details(),
     }
 
 
@@ -35,7 +55,7 @@ async def check_playwright_health() -> dict:
             await page.goto("about:blank", wait_until="domcontentloaded")
         except Exception as exc:
             return _failure("goto_blank", exc)
-        return {"ok": True, "step": "close", "message": "Playwright/Chromium ist startbar.", "exception_type": "", "details": {}}
+        return {"ok": True, "step": "close", "message": "Playwright/Chromium ist startbar.", "exception_type": "", "details": _details()}
     finally:
         if context:
             await context.close()

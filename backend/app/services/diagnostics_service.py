@@ -40,6 +40,26 @@ def explain_exception(exc: Exception) -> tuple[str, str]:
     return ("Fehler trat vor oder waehrend der Webautomation auf.", "Diagnoseordner pruefen und Browser-Check ausfuehren.")
 
 
+def categorize_problem(step: str, exc: Exception | None = None) -> dict[str, Any]:
+    text = f"{step} {type(exc).__name__ if exc else ''} {str(exc) if exc else ''}".lower()
+    if "browser" in text or "playwright" in text or "chromium" in text or "notimplementederror" in text:
+        category = "browser_start"
+    elif "login" in text:
+        category = "login"
+    elif "tab" in text or "table" in text or "overview" in text:
+        category = "overview"
+    else:
+        category = "unknown"
+    return {
+        "problem_category": category,
+        "playwright_started": category != "browser_start",
+        "chromium_started": category != "browser_start",
+        "website_reached": category not in {"browser_start", "unknown"},
+        "selector_problem": category == "overview",
+        "login_problem": category == "login",
+    }
+
+
 def exception_message(exc: Exception, prefix: str = "") -> str:
     text = str(exc).strip() or f"unbekannter Fehler ({type(exc).__name__})"
     return f"{prefix}: {text}" if prefix else text
@@ -78,6 +98,7 @@ def write_route_error_diagnostic(module: str, action: str, step: str, exc: Excep
         "trace_path": "",
         "probable_cause": probable_cause,
         "next_action": next_action,
+        **categorize_problem(step, exc),
         "notes": [],
     }
     if extra:

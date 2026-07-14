@@ -67,10 +67,26 @@ function DiagnosticLinks({ diagnostics }: { diagnostics: KlassenbuchDiagnostics 
   );
 }
 
+function isBrowserStartProblem(diagnostics: KlassenbuchDiagnostics) {
+  const text = [
+    diagnostics.exception_type,
+    diagnostics.error_message,
+    diagnostics.message,
+    diagnostics.probable_cause,
+    diagnostics.step,
+  ].join(' ').toLowerCase();
+
+  return diagnostics.step === 'browser_start'
+    || text.includes('playwright-browserstart')
+    || text.includes('notimplementederror')
+    || text.includes('windows asyncio')
+    || text.includes('chromium konnte nicht gestartet');
+}
+
 function DiagnosticStatusCards({ diagnostics }: { diagnostics: KlassenbuchDiagnostics }) {
   const tabsFound = diagnostics.tabs ? Object.values(diagnostics.tabs).filter((tab) => tab.found).length : undefined;
   const cards = [
-    ['Browserstart', diagnostics.exception_type === 'NotImplementedError' ? 'Fehler' : 'ok/unklar'],
+    ['Browserstart', isBrowserStartProblem(diagnostics) ? 'Fehler' : 'ok/unklar'],
     ['Login', diagnostics.login_success ? 'ok' : 'offen'],
     ['Overview', diagnostics.overview_loaded ? 'ok' : 'offen'],
     ['Tabs', tabsFound ?? '-'],
@@ -224,6 +240,7 @@ export function KlassenbuchPage() {
           <div className="actions">
             <button className="secondary" onClick={loadOpenBooks} disabled={loadingBooks}>{loadingBooks ? 'Laedt...' : 'Klassenbuecher laden'}</button>
             <button className="secondary" onClick={openLatestDiagnostics}>Letzte Diagnose oeffnen</button>
+            <button className="secondary" onClick={runBrowserHealth}>Browser-Check</button>
           </div>
         </div>
         {webRunMessage && <div className="banner info">{webRunMessage}</div>}
@@ -309,7 +326,7 @@ export function KlassenbuchPage() {
         )}
         {latestDiagnostics?.run_id ? (
           <div className="banner info">
-            {latestDiagnostics.exception_type === 'NotImplementedError' && (
+            {isBrowserStartProblem(latestDiagnostics) && (
               <div className="banner warning">
                 <h3>Browser konnte nicht gestartet werden</h3>
                 <p>Der Fehler ist vor dem Oeffnen der Klassenbuch-Webseite aufgetreten. Es liegt sehr wahrscheinlich an Playwright/Chromium oder am Windows-Eventloop, nicht an den Klassenbuch-Selektoren.</p>
