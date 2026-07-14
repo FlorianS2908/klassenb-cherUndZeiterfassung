@@ -3,11 +3,53 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.browser.automation_klassenbuch import KlassenbuchLoadError, load_klassenbuecher_overview, prepare_klassenbuch, submit_klassenbuch
+from app.browser.klassenbuch_login_test import test_klassenbuch_login_only
 from app.browser.playwright_health import check_playwright_health
+from app.config import get_settings
 from app.models.schemas import SubmitRequest
+from app.services.credentials_service import get_klassenbuch_credential_status, write_klassenbuch_local_credentials
 from app.services.diagnostics_service import write_route_error_diagnostic
+from app.services.local_credentials_file import delete_klassenbuch_credentials_file
 
 router = APIRouter(prefix="/api/klassenbuch", tags=["klassenbuch"])
+
+
+@router.get("/credentials/status")
+async def credentials_status():
+    return {"ok": True, "data": get_klassenbuch_credential_status()}
+
+
+@router.post("/credentials/save")
+async def save_credentials(payload: dict[str, str]):
+    try:
+        status = write_klassenbuch_local_credentials(payload.get("username", ""), payload.get("password", ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    get_settings.cache_clear()
+    return {"ok": True, "message": "Klassenbuch-Zugangsdaten wurden lokal gespeichert.", "data": status}
+
+
+@router.post("/credentials/delete")
+async def delete_credentials():
+    delete_klassenbuch_credentials_file()
+    get_settings.cache_clear()
+    return {"ok": True, "message": "Lokale Klassenbuch-Zugangsdaten wurden geloescht.", "data": get_klassenbuch_credential_status()}
+
+
+@router.post("/login-test")
+async def login_test(payload: dict[str, str] | None = None):
+    payload = payload or {}
+    try:
+        result = await test_klassenbuch_login_only(
+            (payload.get("username") or "").strip() or None,
+            payload.get("password") or None,
+            payload.get("url") or None,
+        )
+    except RuntimeError as exc:
+        return {"ok": False, "message": str(exc), "data": {"problem_category": "credentials_missing", "credential_source_used": "missing"}}
+    except Exception:
+        return {"ok": False, "message": "Login fehlgeschlagen.", "data": {"problem_category": "login"}}
+    return {"ok": bool(result.get("ok")), "message": str(result.get("message", "")), "data": result}
 
 
 @router.get("/open")

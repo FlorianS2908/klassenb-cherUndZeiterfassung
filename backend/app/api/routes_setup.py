@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from app.browser.automation_klassenbuch import KlassenbuchLoadError, test_klassenbuch_login as run_klassenbuch_login_test
+from app.browser.klassenbuch_login_test import test_klassenbuch_login_only
+from app.config import get_settings
 from app.models.schemas import ApiMessage, SetupPayload
 from app.services.credentials_service import get_klassenbuch_credential_status, write_klassenbuch_local_credentials
+from app.services.local_credentials_file import delete_klassenbuch_credentials_file
 from app.services.setup_service import check_setup as check_setup_state
 from app.services.setup_service import default_setup_values, save_setup, validate_openai_key_file
 
@@ -57,27 +59,21 @@ def save_setup_payload(payload: SetupPayload):
 @router.post("/test-klassenbuch-login")
 async def test_klassenbuch_login(payload: dict[str, str] | None = None):
     payload = payload or {}
-    credentials = None
     username = (payload.get("username") or payload.get("klassenbuch_username") or "").strip()
     password = payload.get("password") or payload.get("klassenbuch_password") or ""
-    if username and password:
-        credentials = (username, password)
+    url = payload.get("url") or None
     try:
-        result = await run_klassenbuch_login_test(credentials)
-    except KlassenbuchLoadError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "ok": False,
-                "message": "Login fehlgeschlagen. Die lokal gespeicherten Zugangsdaten wurden abgelehnt.",
-                "diagnostics": exc.diagnostics,
-            },
-        ) from exc
-    return ApiMessage(
-        ok=True,
-        message="Login erfolgreich. Klassenbuecher koennen geladen werden.",
-        data={"diagnostics": result.get("diagnostics", {})},
-    )
+        result = await test_klassenbuch_login_only(username or None, password or None, url)
+    except RuntimeError as exc:
+        return ApiMessage(ok=False, message=str(exc), data={"problem_category": "credentials_missing", "credential_source_used": "missing"})
+    except Exception:
+        return ApiMessage(ok=False, message="Login fehlgeschlagen.", data={"problem_category": "login"})
+    return ApiMessage(ok=bool(result.get("ok")), message=str(result.get("message", "")), data=result)
+
+
+@router.get("/local-klassenbuch-credentials/status")
+def local_klassenbuch_credentials_status():
+    return ApiMessage(ok=True, message="Status der lokalen Klassenbuch-Zugangsdaten.", data=get_klassenbuch_credential_status())
 
 
 @router.post("/save-local-klassenbuch-credentials")
@@ -86,10 +82,16 @@ def save_local_klassenbuch_credentials(payload: dict[str, str]):
         status = write_klassenbuch_local_credentials(payload.get("username", ""), payload.get("password", ""))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    from app.config import get_settings
 
     get_settings.cache_clear()
     return ApiMessage(ok=True, message="Klassenbuch-Zugangsdaten wurden lokal gespeichert.", data=status)
+
+
+@router.post("/delete-local-klassenbuch-credentials")
+def delete_local_klassenbuch_credentials():
+    delete_klassenbuch_credentials_file()
+    get_settings.cache_clear()
+    return ApiMessage(ok=True, message="Lokale Klassenbuch-Zugangsdaten wurden geloescht.", data=get_klassenbuch_credential_status())
 
 
 @router.post("/run")

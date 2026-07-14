@@ -6,7 +6,7 @@ import { UeEditor } from '../components/UeEditor/UeEditor';
 import { analyzeFile, getOpenAiStatus, previewRange, uploadFile } from '../services/fileService';
 import { saveAnalysisHistory } from '../services/analysisHistoryService';
 import { checkKlassenbuchBrowserHealth, diagnosticFileUrl, exportLatestKlassenbuchDiagnostic, getLatestKlassenbuchDiagnostics } from '../services/diagnosticsService';
-import { getOpenKlassenbuecher, prepareKlassenbuch } from '../services/klassenbuchService';
+import { deleteKlassenbuchCredentials, getKlassenbuchCredentialStatus, getOpenKlassenbuecher, prepareKlassenbuch, saveKlassenbuchCredentials, testKlassenbuchLoginDirect } from '../services/klassenbuchService';
 import { getStatus } from '../services/statusService';
 import type { AnalysisResult, AppStatus, KlassenbuchDiagnostics, KlassenbuchEntry, UeItem, UploadedFileInfo } from '../types';
 import { ApiError } from '../services/api';
@@ -103,7 +103,7 @@ function DiagnosticStatusCards({ diagnostics }: { diagnostics: KlassenbuchDiagno
   return <div className="cards small-cards">{cards.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>;
 }
 
-export function KlassenbuchPage() {
+export function KlassenbuchPage({ setPage }: { setPage: (page: string) => void }) {
   const [file, setFile] = useState<UploadedFileInfo | null>(null);
   const [selection, setSelection] = useState('');
   const [preview, setPreview] = useState({ text: '', length: 0 });
@@ -122,12 +122,27 @@ export function KlassenbuchPage() {
   const [browserHealth, setBrowserHealth] = useState<Record<string, unknown> | null>(null);
   const [diagnosticExport, setDiagnosticExport] = useState<Record<string, unknown> | null>(null);
   const [exportingDiagnostic, setExportingDiagnostic] = useState(false);
+  const [testingKlassenbuchLogin, setTestingKlassenbuchLogin] = useState(false);
+  const [credentialUsername, setCredentialUsername] = useState('');
+  const [credentialPassword, setCredentialPassword] = useState('');
+  const [credentialStatus, setCredentialStatus] = useState<Record<string, unknown>>({ source: 'missing' });
+  const [credentialMessage, setCredentialMessage] = useState('');
+  const [savingCredentials, setSavingCredentials] = useState(false);
+  const [deletingCredentials, setDeletingCredentials] = useState(false);
+  const [lastLoginTest, setLastLoginTest] = useState('Noch nicht getestet');
 
   useEffect(() => {
     getOpenAiStatus().then(setOpenAi);
     getStatus().then(setAppStatus).catch(() => undefined);
     getLatestKlassenbuchDiagnostics().then((result) => setLatestDiagnostics(result as KlassenbuchDiagnostics)).catch(() => undefined);
+    refreshCredentialStatus();
   }, []);
+
+  async function refreshCredentialStatus() {
+    const response = await getKlassenbuchCredentialStatus();
+    const data = (response as { data?: Record<string, unknown> }).data ?? {};
+    setCredentialStatus(data);
+  }
 
   async function onFile(next: File) {
     const result = await uploadFile(next);
@@ -204,6 +219,56 @@ export function KlassenbuchPage() {
     if (diagnostics) setLatestDiagnostics(diagnostics);
   }
 
+  async function runKlassenbuchLoginCheck() {
+    setTestingKlassenbuchLogin(true);
+    setWebRunMessage('Login-Test laeuft im Hintergrund ...');
+    try {
+      const response = await testKlassenbuchLoginDirect(credentialUsername || undefined, credentialPassword || undefined);
+      const ok = Boolean((response as { ok?: boolean }).ok);
+      setLastLoginTest(ok ? 'Erfolgreich' : 'Fehlgeschlagen');
+      setWebRunMessage(ok ? 'Login erfolgreich.' : 'Login fehlgeschlagen. Die lokal gespeicherten Zugangsdaten wurden abgelehnt.');
+    } catch (error) {
+      setLastLoginTest('Fehlgeschlagen');
+      setWebRunMessage('Login-Test konnte nicht ausgefuehrt werden.');
+    } finally {
+      setTestingKlassenbuchLogin(false);
+    }
+  }
+
+  async function saveCredentials() {
+    if (!credentialUsername.trim() || !credentialPassword) {
+      setCredentialMessage('Bitte Benutzername und Passwort eingeben.');
+      return;
+    }
+    setSavingCredentials(true);
+    setCredentialMessage('');
+    try {
+      await saveKlassenbuchCredentials(credentialUsername, credentialPassword);
+      setCredentialPassword('');
+      await refreshCredentialStatus();
+      setCredentialMessage('Klassenbuch-Zugangsdaten wurden lokal gespeichert.');
+    } catch (error) {
+      setCredentialMessage('Zugangsdaten konnten nicht lokal gespeichert werden.');
+    } finally {
+      setSavingCredentials(false);
+    }
+  }
+
+  async function deleteCredentials() {
+    setDeletingCredentials(true);
+    setCredentialMessage('');
+    try {
+      await deleteKlassenbuchCredentials();
+      setCredentialPassword('');
+      await refreshCredentialStatus();
+      setCredentialMessage('Lokale Klassenbuch-Zugangsdaten wurden geloescht.');
+    } catch (error) {
+      setCredentialMessage('Lokale Zugangsdaten konnten nicht geloescht werden.');
+    } finally {
+      setDeletingCredentials(false);
+    }
+  }
+
   async function exportSanitizedDiagnostic() {
     setExportingDiagnostic(true);
     try {
@@ -221,6 +286,33 @@ export function KlassenbuchPage() {
   return (
     <>
       <div className="page-head"><h1>Klassenbuch</h1></div>
+      <section className="panel">
+        <h2>Klassenbuch-Zugangsdaten</h2>
+        <p className="muted">Die Zugangsdaten werden nur lokal gespeichert und nicht ins Repository uebernommen. Das Passwort wird nach dem Speichern nicht mehr angezeigt.</p>
+        {credentialMessage && <div className="banner info">{credentialMessage}</div>}
+        <div className="form-grid">
+          <label className="field">
+            Benutzername
+            <input value={credentialUsername} onChange={(event) => setCredentialUsername(event.target.value)} placeholder="name@example.com" />
+          </label>
+          <label className="field">
+            Passwort
+            <input type="password" value={credentialPassword} onChange={(event) => setCredentialPassword(event.target.value)} placeholder="Wird nur lokal gespeichert" />
+          </label>
+          <div className="small-cards wide">
+            <div><span>Zugangsdatenquelle</span><strong>{String(credentialStatus.source ?? 'missing')}</strong></div>
+            <div><span>Benutzer vorhanden</span><strong>{credentialStatus.username_present ? 'Ja' : 'Nein'}</strong></div>
+            <div><span>Passwort vorhanden</span><strong>{credentialStatus.password_present ? 'Ja' : 'Nein'}</strong></div>
+            <div><span>Letzter Login-Test</span><strong>{lastLoginTest}</strong></div>
+          </div>
+        </div>
+        <div className="actions">
+          <button className="secondary" onClick={saveCredentials} disabled={savingCredentials}>{savingCredentials ? 'Speichert...' : 'Zugangsdaten lokal speichern'}</button>
+          <button className="secondary" onClick={runKlassenbuchLoginCheck} disabled={testingKlassenbuchLogin}>{testingKlassenbuchLogin ? 'Login-Test laeuft ...' : 'Login testen'}</button>
+          <button className="secondary" onClick={loadOpenBooks} disabled={loadingBooks}>{loadingBooks ? 'Login laeuft ...' : 'Klassenbuecher laden'}</button>
+          <button className="secondary" onClick={deleteCredentials} disabled={deletingCredentials}>{deletingCredentials ? 'Loescht...' : 'Lokale Zugangsdaten loeschen'}</button>
+        </div>
+      </section>
       <FileUpload onFile={onFile} />
       {message && <div className="banner info">{message}</div>}
       {file && (
@@ -272,6 +364,8 @@ export function KlassenbuchPage() {
             <button className="secondary" onClick={loadOpenBooks} disabled={loadingBooks}>{loadingBooks ? 'Login laeuft ...' : 'Klassenbuecher laden'}</button>
             <button className="secondary" onClick={openLatestDiagnostics}>Letzte Diagnose oeffnen</button>
             <button className="secondary" onClick={runBrowserHealth}>Browser-Check</button>
+            <button className="secondary" onClick={runKlassenbuchLoginCheck} disabled={testingKlassenbuchLogin}>{testingKlassenbuchLogin ? 'Login-Test laeuft ...' : 'Login testen'}</button>
+            <button className="secondary" onClick={() => setPage('setup')}>Zum Setup</button>
           </div>
         </div>
         {webRunMessage && <div className="banner info">{webRunMessage}</div>}

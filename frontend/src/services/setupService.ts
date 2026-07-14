@@ -29,3 +29,11 @@ export async function testKlassenbuchLoginWithCredentials(username: string, pass
 export async function saveLocalKlassenbuchCredentials(username: string, password: string) {
   return apiPost<ApiMessage>('/api/setup/save-local-klassenbuch-credentials', { username, password });
 }
+
+export async function getLocalKlassenbuchCredentialStatus() {
+  return apiGet<ApiMessage>('/api/setup/local-klassenbuch-credentials/status');
+}
+
+export async function deleteLocalKlassenbuchCredentials() {
+  return apiPost<ApiMessage>('/api/setup/delete-local-klassenbuch-credentials');
+}

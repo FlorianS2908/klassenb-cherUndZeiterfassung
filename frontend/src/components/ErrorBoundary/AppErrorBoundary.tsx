@@ -26,10 +26,10 @@ export function AppErrorBoundary({ children, resetKey, setPage }: { children: Re
   return (
     <section className="panel">
       <h1>Ein Fehler ist aufgetreten</h1>
-      <p>Die Ansicht konnte nicht geladen werden. Du kannst zur Startseite wechseln oder die letzte Diagnose oeffnen.</p>
+      <p>Die Ansicht konnte nicht geladen werden. Du kannst zur Startseite wechseln oder das Setup oeffnen.</p>
       <div className="actions">
         <button className="primary" onClick={() => setPage('dashboard')}>Zur Startseite</button>
-        <button className="secondary" onClick={() => setPage('klassenbuch')}>Letzte Diagnose oeffnen</button>
+        <button className="secondary" onClick={() => setPage('setup')}>Zum Setup</button>
       </div>
       <details>
         <summary>Technische Details</summary>

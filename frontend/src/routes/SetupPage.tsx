@@ -1,7 +1,7 @@
 import { Eye, EyeOff, KeyRound, RotateCcw, Save, ShieldCheck, TestTube2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { OpenAiKeyFileCheck, SetupPayload } from '../types';
-import { checkSetup, getSetupDefaults, saveLocalKlassenbuchCredentials, saveSetup, testKlassenbuchLogin, testKlassenbuchLoginWithCredentials, validateOpenAiKeyFile } from '../services/setupService';
+import { checkSetup, deleteLocalKlassenbuchCredentials, getLocalKlassenbuchCredentialStatus, getSetupDefaults, saveLocalKlassenbuchCredentials, saveSetup, testKlassenbuchLogin, testKlassenbuchLoginWithCredentials, validateOpenAiKeyFile } from '../services/setupService';
 
 const emptyPayload: SetupPayload = {
   klassenbuch_url: '',
@@ -66,6 +66,7 @@ export function SetupPage({ setPage }: Props) {
   const [saving, setSaving] = useState(false);
   const [testingLogin, setTestingLogin] = useState(false);
   const [savingLocalCredentials, setSavingLocalCredentials] = useState(false);
+  const [deletingLocalCredentials, setDeletingLocalCredentials] = useState(false);
 
   useEffect(() => {
     getSetupDefaults()
@@ -89,6 +90,25 @@ export function SetupPage({ setPage }: Props) {
 
   function setValue<K extends keyof SetupPayload>(key: K, value: SetupPayload[K]) {
     setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function refreshCredentialStatus() {
+    const response = await getLocalKlassenbuchCredentialStatus();
+    const data = response.data as {
+      username_present?: boolean;
+      password_present?: boolean;
+      source?: string;
+      local_file_exists?: boolean;
+      credentials_file_exists?: boolean;
+      credentials_file_path?: string;
+    };
+    setForm((current) => ({
+      ...current,
+      klassenbuch_password_present: Boolean(data.password_present),
+      klassenbuch_password_source: data.source ?? 'missing',
+      klassenbuch_credentials_file_exists: Boolean(data.local_file_exists ?? data.credentials_file_exists),
+      klassenbuch_credentials_file_path: data.credentials_file_path ?? current.klassenbuch_credentials_file_path,
+    }));
   }
 
   async function checkKeyFile() {
@@ -146,7 +166,7 @@ export function SetupPage({ setPage }: Props) {
       const response = form.klassenbuch_password
         ? await testKlassenbuchLoginWithCredentials(form.klassenbuch_username, form.klassenbuch_password)
         : await testKlassenbuchLogin();
-      setStatus({ kind: response.ok ? 'success' : 'error', text: response.message });
+      setStatus({ kind: response.ok ? 'success' : 'error', text: response.ok ? 'Login erfolgreich.' : 'Login fehlgeschlagen.' });
     } catch (error) {
       setStatus({ kind: 'error', text: 'Login fehlgeschlagen. Bitte Benutzername und Passwort neu eingeben.' });
     } finally {
@@ -171,11 +191,33 @@ export function SetupPage({ setPage }: Props) {
         klassenbuch_password_present: true,
         klassenbuch_password_source: 'local_file',
       }));
+      await refreshCredentialStatus();
       setStatus({ kind: 'success', text: 'Zugangsdaten lokal gespeichert.' });
     } catch (error) {
       setStatus({ kind: 'error', text: 'Zugangsdaten konnten nicht lokal gespeichert werden.' });
     } finally {
       setSavingLocalCredentials(false);
+    }
+  }
+
+  async function deleteLocalCredentials() {
+    setDeletingLocalCredentials(true);
+    setStatus(null);
+    try {
+      await deleteLocalKlassenbuchCredentials();
+      setForm((current) => ({
+        ...current,
+        klassenbuch_password: '',
+        klassenbuch_password_present: false,
+        klassenbuch_password_source: 'missing',
+        klassenbuch_credentials_file_exists: false,
+      }));
+      await refreshCredentialStatus();
+      setStatus({ kind: 'success', text: 'Lokale Zugangsdaten geloescht.' });
+    } catch (error) {
+      setStatus({ kind: 'error', text: 'Lokale Zugangsdaten konnten nicht geloescht werden.' });
+    } finally {
+      setDeletingLocalCredentials(false);
     }
   }
 
@@ -234,6 +276,9 @@ export function SetupPage({ setPage }: Props) {
           <div className="actions wide">
             <button className="secondary" onClick={saveLocalCredentials} disabled={savingLocalCredentials}>
               <Save size={18} /> {savingLocalCredentials ? 'Speichert lokal...' : 'Klassenbuch-Zugangsdaten lokal speichern'}
+            </button>
+            <button className="secondary" onClick={deleteLocalCredentials} disabled={deletingLocalCredentials || !form.klassenbuch_credentials_file_exists}>
+              {deletingLocalCredentials ? 'Loescht...' : 'Lokale Zugangsdaten loeschen'}
             </button>
             <button className="secondary" onClick={runKlassenbuchLoginTest} disabled={testingLogin || (!form.klassenbuch_password_present && !form.klassenbuch_password)}>
               <TestTube2 size={18} /> {testingLogin ? 'Test laeuft...' : 'Klassenbuch-Login testen'}

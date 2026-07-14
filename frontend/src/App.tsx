@@ -53,14 +53,11 @@ export default function App() {
   };
   useEffect(() => {
     checkSetup()
-      .then((response) => {
-        if (response.data.setup_required) setPage('setup');
-      })
-      .catch(() => setPage('setup'));
+      .catch(() => undefined);
   }, []);
   const pages: Record<string, ReactNode> = {
     dashboard: <DashboardPage setPage={setPage} />,
-    klassenbuch: <KlassenbuchPage />,
+    klassenbuch: <KlassenbuchPage setPage={setPage} />,
     timebutler: <TimebutlerPage />,
     review: <ReviewPage />,
     'analysis-history': <AnalysisHistoryPage />,

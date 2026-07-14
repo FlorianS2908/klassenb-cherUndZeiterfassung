@@ -8,7 +8,9 @@ from fastapi.testclient import TestClient
 
 from app import config
 from app.api.routes_setup import router
+from app.browser import klassenbuch_login_test
 from app.services import credentials_service
+from app.services import local_credentials_file
 from app.models.schemas import SetupPayload
 from app.services import setup_service
 
@@ -200,7 +202,7 @@ def test_openai_key_file_endpoint_wraps_status_without_secret():
 
 def test_save_local_klassenbuch_credentials_writes_file_without_returning_password(monkeypatch):
     workspace = ROOT / ".tools" / "test_env" / uuid4().hex
-    monkeypatch.setattr(credentials_service, "resolve_project_path", lambda value: workspace / value)
+    monkeypatch.setattr(local_credentials_file, "resolve_project_path", lambda value: workspace / value)
     app = FastAPI()
     app.include_router(router)
     client = TestClient(app)
@@ -219,3 +221,59 @@ def test_save_local_klassenbuch_credentials_writes_file_without_returning_passwo
         import shutil
 
         shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_local_klassenbuch_credentials_status_and_delete(monkeypatch):
+    workspace = ROOT / ".tools" / "test_env" / uuid4().hex
+    monkeypatch.setattr(local_credentials_file, "resolve_project_path", lambda value: workspace / value)
+    monkeypatch.setattr(credentials_service, "get_klassenbuch_credentials_file_status", local_credentials_file.get_klassenbuch_credentials_file_status)
+    monkeypatch.setattr(credentials_service, "read_klassenbuch_credentials_file", local_credentials_file.read_klassenbuch_credentials_file)
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    try:
+        client.post("/api/setup/save-local-klassenbuch-credentials", json={"username": "trainer@example.com", "password": "local-secret"})
+        status_response = client.get("/api/setup/local-klassenbuch-credentials/status")
+        delete_response = client.post("/api/setup/delete-local-klassenbuch-credentials")
+
+        assert status_response.status_code == 200
+        assert status_response.json()["data"]["source"] == "local_file"
+        assert "local-secret" not in str(status_response.json())
+        assert delete_response.status_code == 200
+        assert "geloescht" in delete_response.json()["message"]
+        assert not (workspace / "runtime" / "secrets" / "klassenbuch.credentials.json").exists()
+    finally:
+        import shutil
+
+        shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_klassenbuch_login_endpoint_returns_ok_false_without_hard_error(monkeypatch):
+    async def fake_login(username=None, password=None, url=None):
+        assert username == "trainer@example.com"
+        assert password == "local-secret"
+        return {"ok": False, "message": "Login fehlgeschlagen.", "problem_category": "login", "credential_source_used": "payload"}
+
+    monkeypatch.setattr("app.api.routes_setup.test_klassenbuch_login_only", fake_login)
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    response = client.post("/api/setup/test-klassenbuch-login", json={"username": "trainer@example.com", "password": "local-secret"})
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["ok"] is False
+    assert body["data"]["credential_source_used"] == "payload"
+    assert "local-secret" not in str(body)
+
+
+def test_login_only_contract_does_not_load_overview():
+    import inspect
+
+    source = inspect.getsource(klassenbuch_login_test.test_klassenbuch_login_only)
+
+    assert "_open_overview" not in source
+    assert "load_klassenbuecher_overview" not in source
+    assert "read_all_overview_tabs" not in source

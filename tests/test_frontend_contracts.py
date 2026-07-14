@@ -17,6 +17,10 @@ def test_klassenbuch_ui_exposes_diagnostics_and_browser_check():
     assert "diagnostics/ nicht committen" in content
     assert "Klassenbuecher werden geladen. Login laeuft im Hintergrund" in content
     assert "Login laeuft ..." in content
+    assert "Klassenbuch-Zugangsdaten" in content
+    assert "Zugangsdaten lokal speichern" in content
+    assert "Letzter Login-Test" in content
+    assert "getKlassenbuchCredentialStatus" in content
 
 
 def test_setup_page_shows_secure_credential_storage_and_login_test():
@@ -26,6 +30,7 @@ def test_setup_page_shows_secure_credential_storage_and_login_test():
     assert "Klassenbuch Passwort gespeichert" in content
     assert "Klassenbuch-Login testen" in content
     assert "Klassenbuch-Zugangsdaten lokal speichern" in content
+    assert "Lokale Zugangsdaten loeschen" in content
     assert "testKlassenbuchLogin" in content
 
 
@@ -43,4 +48,5 @@ def test_app_routes_setup_not_found_and_error_boundary():
     assert "Zum Setup" in not_found
     assert "unhandledrejection" in boundary
     assert "window.addEventListener('error'" in boundary
-    assert "Letzte Diagnose oeffnen" in boundary
+    assert "Zum Setup" in boundary
+    assert "Login testen" in (ROOT / "frontend" / "src" / "routes" / "KlassenbuchPage.tsx").read_text(encoding="utf-8")

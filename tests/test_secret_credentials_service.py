@@ -9,7 +9,7 @@ import pytest
 
 from app import config
 from app.config import Settings
-from app.services import credentials_service, secret_store
+from app.services import credentials_service, local_credentials_file, secret_store
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -54,7 +54,7 @@ def test_credentials_service_reads_local_file_before_keyring_and_env(monkeypatch
     credentials_file.parent.mkdir(parents=True)
     credentials_file.write_text(json.dumps({"username": "local@example.com", "password": "local-secret"}), encoding="utf-8")
     try:
-        monkeypatch.setattr(credentials_service, "resolve_project_path", lambda value: workspace / value)
+        monkeypatch.setattr(local_credentials_file, "resolve_project_path", lambda value: workspace / value)
         monkeypatch.setattr(
             credentials_service,
             "get_settings",
