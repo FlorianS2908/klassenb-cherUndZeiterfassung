@@ -23,16 +23,20 @@ export function FileAnalysisPage({
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [items, setItems] = useState<UeItem[]>(workflow.generatedEntries.map((entry) => ({ number: entry.number, content: entry.content, formats: entry.formats })));
   const [message, setMessage] = useState('');
+  const canAnalyze = Boolean(workflow.selectedClassbook && file && selection.trim());
+  const canGoReview = items.length === 9 && items.every((item) => item.content.trim());
 
   if (!workflow.selectedClassbook) {
     return (
       <section className="panel">
         <h1>Kein Klassenbuch ausgewaehlt</h1>
-        <p>Bitte zuerst ein Klassenbuch auswaehlen.</p>
+        <p>Bitte waehlen Sie zuerst unter Klassenbuecher ein bearbeitbares Klassenbuch aus.</p>
         <button className="primary" onClick={() => setPage('klassenbuch')}>Zu den Klassenbuechern</button>
       </section>
     );
   }
+
+  const selectedBook = workflow.selectedClassbook;
 
   async function onFile(next: File) {
     const result = await uploadFile(next);
@@ -44,14 +48,14 @@ export function FileAnalysisPage({
   }
 
   async function loadPreview() {
-    if (!file) return;
+    if (!file || !selection.trim()) return;
     const result = await previewRange(file.file_id, file.filename, selection);
     setPreview({ text: result.text_preview, length: result.text_length });
     setWorkflow({ selectedRange: selection });
   }
 
   async function analyze() {
-    if (!file) return;
+    if (!canAnalyze || !file) return;
     const result = await analyzeFile(file.file_id, file.filename, selection);
     const nextItems = Array.from({ length: 9 }, (_, index) => {
       const source = result.ue_items[index];
@@ -63,41 +67,80 @@ export function FileAnalysisPage({
     });
     setAnalysis(result);
     setItems(nextItems);
-    setWorkflow({ uploadedFile: uploadedFileFromInfo(file), selectedRange: selection, analysisResult: result, generatedEntries: normalizeEntries(nextItems), analysisDone: true });
+    setWorkflow({
+      uploadedFile: uploadedFileFromInfo(file),
+      selectedRange: selection,
+      analysisResult: result,
+      generatedEntries: normalizeEntries(nextItems),
+      analysisDone: true,
+      reviewConfirmed: false,
+      signatureReady: false,
+      reviewDone: false,
+      currentStep: 'analysis',
+    });
     await saveAnalysisHistory({ ...result, filename: file.filename, selection });
   }
 
   function updateItems(nextItems: UeItem[]) {
     setItems(nextItems);
-    setWorkflow({ generatedEntries: normalizeEntries(nextItems), analysisDone: nextItems.length === 9, reviewConfirmed: false, signatureReady: false });
+    setWorkflow({ generatedEntries: normalizeEntries(nextItems), analysisDone: nextItems.length === 9 && nextItems.every((item) => item.content.trim()), reviewConfirmed: false, signatureReady: false, reviewDone: false });
   }
 
   function goReview() {
+    if (!canGoReview) return;
     setWorkflow({ generatedEntries: normalizeEntries(items), analysisDone: true, currentStep: 'review' });
     setPage('review');
+  }
+
+  function resetSelection() {
+    setWorkflow({
+      selectedClassbook: null,
+      uploadedFile: null,
+      selectedRange: '',
+      analysisResult: null,
+      generatedEntries: [],
+      analysisDone: false,
+      reviewConfirmed: false,
+      signatureReady: false,
+      reviewDone: false,
+      currentStep: 'classbooks',
+    });
+    setPage('klassenbuch');
   }
 
   return (
     <>
       <section className="panel">
         <h1>Datei & Analyse</h1>
+        <h2>Ausgewaehltes Klassenbuch</h2>
         <div className="small-cards">
-          <div><span>Ausgewaehltes Klassenbuch</span><strong>{workflow.selectedClassbook.titel || workflow.selectedClassbook.title || workflow.selectedClassbook.raw || '-'}</strong></div>
-          <div><span>Nummer</span><strong>{workflow.selectedClassbook.nummer || workflow.selectedClassbook.number || '-'}</strong></div>
-          <div><span>Datum</span><strong>{workflow.selectedClassbook.datum || workflow.selectedClassbook.date || '-'}</strong></div>
-          <div><span>Raum</span><strong>{workflow.selectedClassbook.raum || '-'}</strong></div>
+          <div><span>Titel</span><strong>{selectedBook.titel || selectedBook.title || selectedBook.raw || '-'}</strong></div>
+          <div><span>Nummer</span><strong>{selectedBook.nummer || selectedBook.number || '-'}</strong></div>
+          <div><span>Datum</span><strong>{selectedBook.datum || selectedBook.date || '-'}</strong></div>
+          <div><span>Raum</span><strong>{selectedBook.raum || '-'}</strong></div>
+          <div><span>Status</span><strong>{selectedBook.status || '-'}</strong></div>
+          <div><span>Tab/Gruppe</span><strong>{selectedBook.tab || '-'}</strong></div>
+          <div><span>Einsatzzeit von</span><strong>{selectedBook.einsatzzeit_von || selectedBook.beginn || '-'}</strong></div>
+          <div><span>Einsatzzeit bis</span><strong>{selectedBook.einsatzzeit_bis || selectedBook.ende || '-'}</strong></div>
+        </div>
+        {workflow.selectedClassbook && workflow.uploadedFile && <div className="banner info">Aus vorheriger Sitzung wiederhergestellt.</div>}
+        <div className="actions">
+          <button className="secondary" onClick={() => setPage('klassenbuch')}>Anderes Klassenbuch auswaehlen</button>
+          <button className="secondary" onClick={resetSelection}>Auswahl zuruecksetzen</button>
         </div>
         <FileUpload onFile={onFile} />
         {message && <div className="banner info">{message}</div>}
         {file && (
           <>
             <RangeSelector value={selection} onChange={setSelection} unit={file.unit_label} />
+            {!selection.trim() && <div className="banner warning">Bitte geben Sie die Folien-/Seitenrange ein, bevor die KI-Analyse gestartet wird.</div>}
             <div className="actions">
-              <button className="secondary" onClick={loadPreview}>Vorschau laden</button>
-              <button className="primary" onClick={analyze}>KI-Analyse starten</button>
+              <button className="secondary" disabled={!selection.trim()} onClick={loadPreview}>Vorschau laden</button>
+              <button className="primary" disabled={!canAnalyze} onClick={analyze}>KI-Analyse starten</button>
             </div>
           </>
         )}
+        {!file && <div className="banner info">Bitte laden Sie zuerst eine Datei hoch.</div>}
       </section>
       <ExtractedTextPreview text={preview.text} length={preview.length} />
       {analysis && (
@@ -110,7 +153,7 @@ export function FileAnalysisPage({
         <>
           <UeEditor items={items} onChange={updateItems} />
           <div className="actions">
-            <button className="primary" disabled={items.length !== 9} onClick={goReview}>Zur Review</button>
+            <button className="primary" disabled={!canGoReview} onClick={goReview}>Zur Review</button>
           </div>
         </>
       )}

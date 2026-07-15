@@ -55,7 +55,35 @@ async def login_test(payload: dict[str, str] | None = None):
 @router.get("/open")
 async def open_books():
     try:
-        result = await load_klassenbuecher_overview()
+        result = await load_klassenbuecher_overview(fast=True, diagnostics_enabled=False, tabs=["offene"])
+    except KlassenbuchLoadError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "ok": False,
+                "message": str(exc) or "Klassenbuecher konnten nicht geladen werden.",
+                "exception_type": exc.diagnostics.get("exception_type", type(exc).__name__),
+                "diagnostics": exc.diagnostics,
+            },
+        ) from exc
+    except Exception as exc:
+        diagnostics = write_route_error_diagnostic("klassenbuch", "load_open_klassenbuecher", "route_open_books", exc)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "ok": False,
+                "message": diagnostics["error_message"],
+                "exception_type": type(exc).__name__,
+                "diagnostics": diagnostics,
+            },
+        ) from exc
+    return result
+
+
+@router.get("/open-diagnostic")
+async def open_books_diagnostic():
+    try:
+        result = await load_klassenbuecher_overview(fast=False, diagnostics_enabled=True, tabs=["offene", "ueberfaellige", "freigegebene", "korrektur"])
     except KlassenbuchLoadError as exc:
         raise HTTPException(
             status_code=500,

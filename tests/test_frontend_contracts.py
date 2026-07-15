@@ -15,7 +15,8 @@ def test_klassenbuch_ui_exposes_diagnostics_and_browser_check():
     assert "Fehlerbericht fuers Repo exportieren" in content
     assert "exportLatestKlassenbuchDiagnostic" in content
     assert "diagnostics/ nicht committen" in content
-    assert "Klassenbuecher werden geladen. Login laeuft im Hintergrund" in content
+    assert "Klassenbuecher werden geladen ... Login/Session wird geprueft ... Offene Klassenbuecher werden gelesen" in content
+    assert "Vollstaendige Diagnose laden" in content
     assert "Login laeuft ..." in content
     assert "Klassenbuch-Zugangsdaten" in content
     assert "Zugangsdaten lokal speichern" in content
@@ -50,6 +51,12 @@ def test_app_routes_setup_not_found_and_error_boundary():
     assert "window.addEventListener('error'" in boundary
     assert "Zum Setup" in boundary
     assert "Login testen" in (ROOT / "frontend" / "src" / "routes" / "KlassenbuchPage.tsx").read_text(encoding="utf-8")
+    klassenbuch_page = (ROOT / "frontend" / "src" / "routes" / "KlassenbuchPage.tsx").read_text(encoding="utf-8")
+    service = (ROOT / "frontend" / "src" / "services" / "klassenbuchService.ts").read_text(encoding="utf-8")
+    assert "Klassenbuecher werden geladen ... Login/Session wird geprueft ... Offene Klassenbuecher werden gelesen" in klassenbuch_page
+    assert "Vollstaendige Diagnose laden" in klassenbuch_page
+    assert "getOpenKlassenbuecherDiagnostic" in klassenbuch_page
+    assert "/api/klassenbuch/open-diagnostic" in service
 
 
 def test_guided_klassenbuch_workflow_contracts():
@@ -77,13 +84,41 @@ def test_guided_klassenbuch_workflow_contracts():
     assert "Workflow zuruecksetzen" in layout
     assert "Erweiterte Tools" in layout
     assert "selectedClassbook" in layout
-    assert "Auswaehlen & weiter" in klassenbuch
-    assert "setPage('analysis')" in klassenbuch
+    assert "Zuerst ein Klassenbuch unter Schritt 2 auswaehlen" in layout
+    assert "Zuerst Datei hochladen und KI-Analyse abschliessen" in layout
+    assert "disabled={disabled}" in layout
+    assert "workflow.generatedEntries.length !== 9" in layout
+    assert "done" in layout
+    assert "Bearbeiten / Auswaehlen & weiter" in klassenbuch
+    assert "Nicht bearbeitbar" in klassenbuch
+    assert "disabled={!editable}" in klassenbuch
+    assert "if (!book.editable) return" in klassenbuch
+    assert "setPage('analysis', { selectedClassbook: true })" in klassenbuch
     assert "setWorkflow({" in klassenbuch
+    assert "analysisResult: null" in klassenbuch
+    assert "reviewConfirmed: false" in klassenbuch
+    assert "signatureReady: false" in klassenbuch
     assert "Kein Klassenbuch ausgewaehlt" in analysis
+    assert "Bitte waehlen Sie zuerst unter Klassenbuecher ein bearbeitbares Klassenbuch aus." in analysis
+    assert "Ausgewaehltes Klassenbuch" in analysis
+    assert "<span>Titel</span>" in analysis
+    assert "<span>Nummer</span>" in analysis
+    assert "<span>Datum</span>" in analysis
+    assert "<span>Raum</span>" in analysis
+    assert "<span>Status</span>" in analysis
+    assert "<span>Tab/Gruppe</span>" in analysis
+    assert "Anderes Klassenbuch auswaehlen" in analysis
+    assert "Auswahl zuruecksetzen" in analysis
+    assert "Bitte laden Sie zuerst eine Datei hoch." in analysis
+    assert "disabled={!selection.trim()}" in analysis
+    assert "disabled={!canAnalyze}" in analysis
+    assert "const canAnalyze = Boolean(workflow.selectedClassbook && file && selection.trim())" in analysis
+    assert "Bitte geben Sie die Folien-/Seitenrange ein" in analysis
     assert "KI-Analyse starten" in analysis
     assert "Array.from({ length: 9 }" in analysis
     assert "Zur Review" in analysis
+    assert "const canGoReview = items.length === 9 && items.every((item) => item.content.trim())" in analysis
+    assert "disabled={!canGoReview}" in analysis
     assert "normalizeEntries" in analysis
     assert "Review noch nicht verfuegbar" in review
     assert "Ich habe die 9 Unterrichtseinheiten geprueft" in review
@@ -108,3 +143,15 @@ def test_guided_klassenbuch_workflow_contracts():
     assert "Gespeicherte Signatur testen" in signature
     assert "preview_png_data_url" in signature_service
     assert "/api/signature/save" in signature_service
+
+
+def test_app_hard_guards_direct_workflow_urls():
+    app = (ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+
+    assert "page === 'analysis' && !workflow.selectedClassbook" in app
+    assert "setPageState('klassenbuch')" in app
+    assert "window.history.replaceState(null, '', '/klassenbuch')" in app
+    assert "Bitte zuerst ein Klassenbuch auswaehlen." in app
+    assert "page === 'review' && (!workflow.analysisDone || workflow.generatedEntries.length !== 9)" in app
+    assert "setPageState('analysis')" in app
+    assert "setPage('analysis', { selectedClassbook: true })" not in app

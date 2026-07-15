@@ -24,8 +24,8 @@ function isDone(id: string, workflow: WorkflowState) {
 }
 
 function disabledTitle(id: string) {
-  if (id === 'analysis') return 'Zuerst Klassenbuch auswaehlen';
-  if (id === 'review') return 'Zuerst Analyse abschliessen';
+  if (id === 'analysis') return 'Zuerst ein Klassenbuch unter Schritt 2 auswaehlen';
+  if (id === 'review') return 'Zuerst Datei hochladen und KI-Analyse abschliessen';
   return '';
 }
 
@@ -60,7 +60,7 @@ export function Layout({
           {workflowNav.map(([id, label, Icon]) => {
             const disabled = isDisabled(id, workflow);
             return (
-              <button key={id} className={page === id ? 'active' : ''} disabled={disabled} title={disabled ? disabledTitle(id) : ''} onClick={() => setPage(id)}>
+              <button key={id} className={`${page === id ? 'active' : ''} ${isDone(id, workflow) ? 'done' : ''}`.trim()} disabled={disabled} title={disabled ? disabledTitle(id) : ''} onClick={() => setPage(id)}>
                 {isDone(id, workflow) ? <Check size={18} /> : <Icon size={18} />} {label}
               </button>
             );

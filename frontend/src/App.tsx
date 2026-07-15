@@ -53,29 +53,63 @@ function pageFromPath(pathname: string) {
 export default function App() {
   const initialPage = pageFromPath(window.location.pathname);
   const [page, setPageState] = useState(initialPage);
+  const [workflowNotice, setWorkflowNotice] = useState('');
   const { workflow, setWorkflow, resetWorkflow } = useWorkflowState();
-  const setPage = (nextPage: string) => {
-    if (nextPage === 'analysis' && !workflow.selectedClassbook) {
-      setPageState('klassenbuch');
-      window.history.replaceState(null, '', '/klassenbuch');
-      return;
+  const guardedPage = (nextPage: string, options?: { selectedClassbook?: boolean }) => {
+    const hasSelectedClassbook = options?.selectedClassbook ?? Boolean(workflow.selectedClassbook);
+    if (nextPage === 'analysis' && !hasSelectedClassbook) {
+      setWorkflowNotice('Bitte zuerst ein Klassenbuch auswaehlen.');
+      setWorkflow({ currentStep: 'classbooks' });
+      return 'klassenbuch';
     }
     if (nextPage === 'review' && (!workflow.analysisDone || workflow.generatedEntries.length !== 9)) {
-      setPageState('analysis');
-      window.history.replaceState(null, '', '/analysis');
-      return;
+      if (hasSelectedClassbook) {
+        setWorkflowNotice('Zuerst Datei hochladen und KI-Analyse abschliessen.');
+        setWorkflow({ currentStep: 'analysis' });
+        return 'analysis';
+      }
+      setWorkflowNotice('Bitte zuerst ein Klassenbuch auswaehlen.');
+      setWorkflow({ currentStep: 'classbooks' });
+      return 'klassenbuch';
     }
-    setPageState(nextPage);
+    setWorkflowNotice('');
+    return nextPage;
+  };
+  const setPage = (nextPage: string, options?: { selectedClassbook?: boolean }) => {
+    const targetPage = guardedPage(nextPage, options);
+    setPageState(targetPage);
     setWorkflow({
-      currentStep: nextPage === 'dashboard' ? 'overview' : nextPage === 'klassenbuch' ? 'classbooks' : nextPage === 'analysis' ? 'analysis' : nextPage === 'review' ? 'review' : workflow.currentStep,
+      currentStep: targetPage === 'dashboard' ? 'overview' : targetPage === 'klassenbuch' ? 'classbooks' : targetPage === 'analysis' ? 'analysis' : targetPage === 'review' ? 'review' : workflow.currentStep,
     });
-    const path = pagePaths[nextPage] ?? '/';
+    const path = pagePaths[targetPage] ?? '/';
     window.history.replaceState(null, '', path);
   };
   useEffect(() => {
     checkSetup()
       .catch(() => undefined);
   }, []);
+  useEffect(() => {
+    if (page === 'analysis' && !workflow.selectedClassbook) {
+      setWorkflowNotice('Bitte zuerst ein Klassenbuch auswaehlen.');
+      setWorkflow({ currentStep: 'classbooks' });
+      setPageState('klassenbuch');
+      window.history.replaceState(null, '', '/klassenbuch');
+      return;
+    }
+    if (page === 'review' && (!workflow.analysisDone || workflow.generatedEntries.length !== 9)) {
+      if (workflow.selectedClassbook) {
+        setWorkflowNotice('Zuerst Datei hochladen und KI-Analyse abschliessen.');
+        setWorkflow({ currentStep: 'analysis' });
+        setPageState('analysis');
+        window.history.replaceState(null, '', '/analysis');
+        return;
+      }
+      setWorkflowNotice('Bitte zuerst ein Klassenbuch auswaehlen.');
+      setWorkflow({ currentStep: 'classbooks' });
+      setPageState('klassenbuch');
+      window.history.replaceState(null, '', '/klassenbuch');
+    }
+  }, [page, workflow.selectedClassbook, workflow.analysisDone, workflow.generatedEntries.length]);
   const pages: Record<string, ReactNode> = {
     dashboard: <DashboardPage setPage={setPage} />,
     klassenbuch: <KlassenbuchPage setPage={setPage} workflow={workflow} setWorkflow={setWorkflow} />,
@@ -92,6 +126,7 @@ export default function App() {
   };
   return (
     <Layout page={page} setPage={setPage} workflow={workflow} resetWorkflow={resetWorkflow}>
+      {workflowNotice && <div className="banner warning">{workflowNotice}</div>}
       <AppErrorBoundary resetKey={page} setPage={setPage}>{pages[page] ?? pages['not-found']}</AppErrorBoundary>
     </Layout>
   );

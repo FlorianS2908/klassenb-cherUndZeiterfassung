@@ -2,7 +2,7 @@ export function RangeSelector({ value, onChange, unit }: { value: string; onChan
   return (
     <div className="field">
       <label>Auswertungsbereich</label>
-      <input value={value} placeholder={`leer = alle ${unit}; z. B. 1-5, 8, 10-12`} onChange={(event) => onChange(event.target.value)} />
+      <input value={value} placeholder={`z. B. 5-10 ${unit}`} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
 }

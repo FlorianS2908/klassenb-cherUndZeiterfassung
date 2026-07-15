@@ -82,6 +82,46 @@ def test_fill_classbook_and_open_signature_calls_only_until_signature_page():
     assert "submit_klassenbuch" not in source
 
 
+def test_load_klassenbuecher_overview_defaults_to_fast_open_only():
+    signature = inspect.signature(automation_klassenbuch.load_klassenbuecher_overview)
+    assert signature.parameters["fast"].default is True
+    assert signature.parameters["diagnostics_enabled"].default is False
+    source = inspect.getsource(automation_klassenbuch.load_klassenbuecher_overview)
+    assert 'tabs = tabs or ["offene"]' in source
+    assert "await _start_trace(page, diag)" in source
+    assert "if diag:" in source
+    assert "already_on_overview = await _login(page, diag, fast=fast)" in source
+    assert "if not already_on_overview:" in source
+    assert "await _open_overview(page, diag, fast=fast)" in source
+    assert "timings_ms" in source
+
+
+def test_read_all_overview_tabs_accepts_tab_filter_and_fast_mode():
+    signature = inspect.signature(automation_klassenbuch.read_all_overview_tabs)
+    assert "tabs" in signature.parameters
+    assert "fast" in signature.parameters
+    source = inspect.getsource(automation_klassenbuch.read_all_overview_tabs)
+    assert "if key not in selected_tabs" in source
+
+
+def test_click_overview_tab_uses_short_fast_wait():
+    source = inspect.getsource(automation_klassenbuch._click_overview_tab)
+    assert "wait_for_timeout(150)" in source
+    assert "wait_for_timeout(700)" in source
+    assert "if fast:" in source
+    assert 'await _safe_screenshot(page, f"klassenbuch_tab_{key}_loaded")' in source
+
+
+def test_fast_mode_skips_trace_and_tab_screenshots_by_default():
+    overview_source = inspect.getsource(automation_klassenbuch.load_klassenbuecher_overview)
+    tab_source = inspect.getsource(automation_klassenbuch.read_all_overview_tabs)
+
+    assert "diag = KlassenbuchDiagnosticsRun" in overview_source
+    assert "if diagnostics_enabled else None" in overview_source
+    assert "if diag:\n                _attach_diagnostic_listeners(page, diag)\n                await _start_trace(page, diag)" in overview_source
+    assert 'await _safe_screenshot(page, f"klassenbuch_tab_{key}_error") if diag else ""' in tab_source
+
+
 def test_schaffer_signature_points_stay_inside_canvas():
     points = _signature_points()
     assert len(points) >= 30
@@ -317,7 +357,7 @@ def test_login_uses_credentials_service_instead_of_settings_password():
 
     assert "get_klassenbuch_credentials()" in source
     assert "settings.klassenbuch_password" not in source
-    assert "await _login(page, diag)" in overview_source
+    assert "await _login(page, diag, fast=fast)" in overview_source
 
 
 def test_save_html_snapshot_masks_password_values(monkeypatch):

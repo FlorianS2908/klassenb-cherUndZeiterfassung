@@ -68,6 +68,44 @@ def test_open_books_route_error_returns_diagnostics_folder(monkeypatch):
     assert body["detail"]["diagnostics"]["probable_cause"]
 
 
+def test_open_books_uses_fast_open_tab_only(monkeypatch):
+    async def fake_load(**kwargs):
+        assert kwargs["fast"] is True
+        assert kwargs["diagnostics_enabled"] is False
+        assert kwargs["tabs"] == ["offene"]
+        return {"ok": True, "items": [], "groups": {}, "diagnostics": {"fast_mode": True, "tabs_loaded": ["offene"], "timings_ms": {"total": 1}}, "count": 0}
+
+    monkeypatch.setattr(routes_klassenbuch, "load_klassenbuecher_overview", fake_load)
+    app = FastAPI()
+    app.include_router(routes_klassenbuch.router)
+    client = TestClient(app)
+
+    response = client.get("/api/klassenbuch/open")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["diagnostics"]["fast_mode"] is True
+    assert body["diagnostics"]["tabs_loaded"] == ["offene"]
+
+
+def test_open_books_diagnostic_enables_full_diagnostics(monkeypatch):
+    async def fake_load(**kwargs):
+        assert kwargs["fast"] is False
+        assert kwargs["diagnostics_enabled"] is True
+        assert kwargs["tabs"] == ["offene", "ueberfaellige", "freigegebene", "korrektur"]
+        return {"ok": True, "items": [], "groups": {}, "diagnostics": {"fast_mode": False}, "count": 0}
+
+    monkeypatch.setattr(routes_klassenbuch, "load_klassenbuecher_overview", fake_load)
+    app = FastAPI()
+    app.include_router(routes_klassenbuch.router)
+    client = TestClient(app)
+
+    response = client.get("/api/klassenbuch/open-diagnostic")
+
+    assert response.status_code == 200
+    assert response.json()["diagnostics"]["fast_mode"] is False
+
+
 def test_klassenbuch_credentials_endpoints_do_not_return_password(monkeypatch):
     workspace = ROOT / ".tools" / "test_env" / uuid4().hex
     monkeypatch.setattr(local_credentials_file, "resolve_project_path", lambda value: workspace / value)

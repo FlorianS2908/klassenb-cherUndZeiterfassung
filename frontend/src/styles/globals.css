@@ -15,7 +15,9 @@ button { border: 0; cursor: pointer; }
 .sidebar nav { display: grid; gap: 8px; }
 .sidebar button { display: flex; align-items: center; gap: 10px; color: #dbe5ef; background: transparent; padding: 12px; border-radius: 8px; text-align: left; }
 .sidebar button.active, .sidebar button:hover { background: #243647; color: #fff; }
-.sidebar button:disabled { opacity: 0.45; cursor: not-allowed; }
+.sidebar button.done { color: #dff8ea; }
+.sidebar button.active { box-shadow: inset 4px 0 0 #5fb3ff; }
+.sidebar button:disabled { opacity: 0.34; cursor: not-allowed; filter: grayscale(1); }
 .main { padding: 30px; max-width: 1320px; width: 100%; }
 .topbar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 18px; position: relative; }
 .gear-menu { position: relative; }

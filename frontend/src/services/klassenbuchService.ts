@@ -2,6 +2,7 @@ import { apiGet, apiPost } from './api';
 import type { KlassenbuchOpenResponse } from '../types';
 
 export const getOpenKlassenbuecher = () => apiGet<KlassenbuchOpenResponse>('/api/klassenbuch/open');
+export const getOpenKlassenbuecherDiagnostic = () => apiGet<KlassenbuchOpenResponse>('/api/klassenbuch/open-diagnostic');
 export const prepareKlassenbuch = (payload: unknown) => apiPost('/api/klassenbuch/prepare', payload);
 export const fillClassbookAndOpenSignature = (payload: unknown, review_confirmed: boolean) => apiPost('/api/klassenbuch/fill-and-open-signature', { payload, review_confirmed });
 export const prepareKlassenbuchSignature = (payload: unknown, review_confirmed: boolean) => apiPost('/api/klassenbuch/prepare-signature', { payload, review_confirmed });

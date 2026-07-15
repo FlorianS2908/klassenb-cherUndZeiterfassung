@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { checkKlassenbuchBrowserHealth, diagnosticFileUrl, exportLatestKlassenbuchDiagnostic, getLatestKlassenbuchDiagnostics } from '../services/diagnosticsService';
-import { deleteKlassenbuchCredentials, getKlassenbuchCredentialStatus, getOpenKlassenbuecher, saveKlassenbuchCredentials, testKlassenbuchLoginDirect } from '../services/klassenbuchService';
+import { deleteKlassenbuchCredentials, getKlassenbuchCredentialStatus, getOpenKlassenbuecher, getOpenKlassenbuecherDiagnostic, saveKlassenbuchCredentials, testKlassenbuchLoginDirect } from '../services/klassenbuchService';
 import { ApiError } from '../services/api';
 import type { KlassenbuchDiagnostics, KlassenbuchEntry } from '../types';
 import type { WorkflowState } from '../state/workflowState';
@@ -102,7 +102,7 @@ export function KlassenbuchPage({
   workflow,
   setWorkflow,
 }: {
-  setPage: (page: string) => void;
+  setPage: (page: string, options?: { selectedClassbook?: boolean }) => void;
   workflow: WorkflowState;
   setWorkflow: (patch: Partial<WorkflowState>) => void;
 }) {
@@ -137,14 +137,16 @@ export function KlassenbuchPage({
 
   async function loadOpenBooks() {
     setLoadingBooks(true);
-    setWebRunMessage('Klassenbuecher werden geladen. Login laeuft im Hintergrund ...');
+    setWebRunMessage('Klassenbuecher werden geladen ... Login/Session wird geprueft ... Offene Klassenbuecher werden gelesen ...');
     try {
       const result = await getOpenKlassenbuecher();
       setOpenBooks(result.items);
       setBookGroups(groupKlassenbuecher(result.items, result.groups));
       setBookDiagnostics(result.diagnostics ?? null);
       setLatestDiagnostics((result.diagnostics ?? null) as KlassenbuchDiagnostics | null);
-      setWebRunMessage(`${result.count ?? result.items.length} Klassenbuecher geladen.`);
+      const timings = (result.diagnostics as { timings_ms?: Record<string, number> } | undefined)?.timings_ms;
+      const timingText = timings?.total ? ` (${timings.total} ms)` : '';
+      setWebRunMessage(`${result.count ?? result.items.length} offene Klassenbuch-Eintraege geladen.${timingText}`);
     } catch (error) {
       const parsedError = klassenbuchError(error);
       const lowerMessage = parsedError.message.toLowerCase();
@@ -163,18 +165,44 @@ export function KlassenbuchPage({
     }
   }
 
+  async function loadOpenBooksDiagnostic() {
+    setLoadingBooks(true);
+    setWebRunMessage('Vollstaendige Diagnose wird geladen. Das kann laenger dauern ...');
+    try {
+      const result = await getOpenKlassenbuecherDiagnostic();
+      setOpenBooks(result.items);
+      setBookGroups(groupKlassenbuecher(result.items, result.groups));
+      setBookDiagnostics(result.diagnostics ?? null);
+      setLatestDiagnostics((result.diagnostics ?? null) as KlassenbuchDiagnostics | null);
+      setWebRunMessage(`${result.count ?? result.items.length} Klassenbuecher mit Diagnose geladen.`);
+    } catch (error) {
+      const parsedError = klassenbuchError(error);
+      setOpenBooks([]);
+      setBookGroups(groupKlassenbuecher([]));
+      setBookDiagnostics(parsedError.diagnostics);
+      setLatestDiagnostics(parsedError.diagnostics);
+      setWebRunMessage(`Diagnose konnte nicht geladen werden: ${parsedError.message}`);
+    } finally {
+      setLoadingBooks(false);
+    }
+  }
+
   function selectBook(book: KlassenbuchEntry) {
+    if (!book.editable) return;
     setWorkflow({
       selectedClassbook: book,
       uploadedFile: null,
       selectedRange: '',
+      analysisResult: null,
       generatedEntries: [],
       analysisDone: false,
+      reviewConfirmed: false,
+      signatureReady: false,
       reviewDone: false,
       currentStep: 'analysis',
     });
     setWebRunMessage(`Klassenbuch ausgewaehlt: ${book.titel || book.title || book.nummer || book.number || book.datum || book.date || book.raw || 'unbekannt'}`);
-    setPage('analysis');
+    setPage('analysis', { selectedClassbook: true });
   }
 
   async function openLatestDiagnostics() {
@@ -290,6 +318,7 @@ export function KlassenbuchPage({
           <h2>Klassenbuecher</h2>
           <div className="actions">
             <button className="secondary" onClick={loadOpenBooks} disabled={loadingBooks}>{loadingBooks ? 'Login laeuft ...' : 'Klassenbuecher laden'}</button>
+            <button className="secondary" onClick={loadOpenBooksDiagnostic} disabled={loadingBooks}>Vollstaendige Diagnose laden</button>
             <button className="secondary" onClick={openLatestDiagnostics}>Letzte Diagnose oeffnen</button>
             <button className="secondary" onClick={runBrowserHealth}>Browser-Check</button>
             <button className="secondary" onClick={runKlassenbuchLoginCheck} disabled={testingKlassenbuchLogin}>{testingKlassenbuchLogin ? 'Login-Test laeuft ...' : 'Login testen'}</button>
@@ -346,20 +375,24 @@ export function KlassenbuchPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {groupItems.map((book) => (
-                    <tr key={book.id}>
-                      <td>{book.datum || book.date || '-'}</td>
-                      <td>{book.status || '-'}</td>
-                      <td>{book.nummer || book.number || '-'}</td>
-                      <td>{book.titel || book.title || book.raw || '-'}</td>
-                      <td>{book.raum || '-'}</td>
-                      <td>{book.beginn || '-'}</td>
-                      <td>{book.ende || '-'}</td>
-                      <td>{book.einsatzzeit_von || '-'} - {book.einsatzzeit_bis || '-'}</td>
-                      <td>{book.editable ? 'ja' : 'nein'}</td>
-                      <td><button className="secondary" onClick={() => selectBook(book)}>Auswaehlen & weiter</button></td>
-                    </tr>
-                  ))}
+                  {groupItems.map((book) => {
+                    const editable = book.editable === true;
+                    const statusWarning = editable && book.status && book.status.toLowerCase() !== 'offen';
+                    return (
+                      <tr key={book.id}>
+                        <td>{book.datum || book.date || '-'}</td>
+                        <td>{book.status || '-'}</td>
+                        <td>{book.nummer || book.number || '-'}</td>
+                        <td>{book.titel || book.title || book.raw || '-'}</td>
+                        <td>{book.raum || '-'}</td>
+                        <td>{book.beginn || '-'}</td>
+                        <td>{book.ende || '-'}</td>
+                        <td>{book.einsatzzeit_von || '-'} - {book.einsatzzeit_bis || '-'}</td>
+                        <td>{editable ? 'ja' : 'nein'}{statusWarning ? <div className="muted">Dieses Klassenbuch ist nicht im Status Offen.</div> : null}</td>
+                        <td><button className="secondary" disabled={!editable} onClick={() => selectBook(book)}>{editable ? 'Bearbeiten / Auswaehlen & weiter' : 'Nicht bearbeitbar'}</button></td>
+                      </tr>
+                    );
+                  })}
                   {groupItems.length === 0 && <tr><td colSpan={10}>Keine Eintraege in dieser Gruppe.</td></tr>}
                 </tbody>
               </table>

@@ -6,6 +6,7 @@ import re
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -355,34 +356,47 @@ async def _wait_for_login_result(page) -> bool:
     return await _is_any_visible(page, KLASSENBUCH_SELECTORS["overview_url_marker"])
 
 
-async def _login(page, diag: KlassenbuchDiagnosticsRun | None = None, credentials: tuple[str, str] | None = None) -> None:
+async def _wait_for_overview_ready(page, timeout: int = 5000) -> None:
+    await page.wait_for_selector("table, tr[data-index], text=Themendokumentationen", timeout=timeout)
+
+
+async def _login(page, diag: KlassenbuchDiagnosticsRun | None = None, credentials: tuple[str, str] | None = None, fast: bool = False) -> bool:
     settings = get_settings()
     username, password = credentials or get_klassenbuch_credentials()
     try:
         if _storage_state_path().exists():
             await page.goto(_overview_url(), wait_until="domcontentloaded")
-            try:
-                await page.wait_for_load_state("networkidle", timeout=5000)
-            except Exception:
-                pass
+            if fast:
+                try:
+                    await _wait_for_overview_ready(page)
+                except Exception:
+                    pass
+            else:
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=5000)
+                except Exception:
+                    pass
             if "/login" not in page.url.lower() and await _is_any_visible(page, KLASSENBUCH_SELECTORS["overview_url_marker"]):
-                await _safe_screenshot(page, "klassenbuch_session_reused")
+                if diag:
+                    await _safe_screenshot(page, "klassenbuch_session_reused")
                 await _diag_step(page, diag, "session_reused")
                 if diag:
                     diag.login_success = True
                     diag.overview_loaded = True
-                return
+                return True
             await _diag_step(page, diag, "session_expired")
         await page.goto(settings.klassenbuch_url, wait_until="domcontentloaded")
-        await _safe_screenshot(page, "klassenbuch_login_loaded")
+        if diag:
+            await _safe_screenshot(page, "klassenbuch_login_loaded")
         await _diag_step(page, diag, "login_loaded")
         if "/login" not in page.url.lower():
-            await _safe_screenshot(page, "klassenbuch_login_success")
+            if diag:
+                await _safe_screenshot(page, "klassenbuch_login_success")
             await _diag_step(page, diag, "login_success")
             await _save_storage_state(page)
             if diag:
                 diag.login_success = True
-            return
+            return "/overview" in page.url.lower() or await _is_any_visible(page, KLASSENBUCH_SELECTORS["overview_url_marker"])
         await fill_first(page, KLASSENBUCH_SELECTORS["username"], username, "Benutzername")
         await fill_first(page, KLASSENBUCH_SELECTORS["password"], password, "Passwort")
         await click_first(page, KLASSENBUCH_SELECTORS["login_button"], "Anmelden")
@@ -398,15 +412,23 @@ async def _login(page, diag: KlassenbuchDiagnosticsRun | None = None, credential
                 detail = f"{detail}: {login_message}"
             await _diag_step(page, diag, "login_failed", {"login_error": login_message})
             await _raise_load_error(page, "login_failed", detail)
-        try:
-            await page.wait_for_load_state("networkidle", timeout=5000)
-        except Exception:
-            pass
-        await _safe_screenshot(page, "klassenbuch_login_success")
+        if fast:
+            try:
+                await _wait_for_overview_ready(page)
+            except Exception:
+                pass
+        else:
+            try:
+                await page.wait_for_load_state("networkidle", timeout=5000)
+            except Exception:
+                pass
+        if diag:
+            await _safe_screenshot(page, "klassenbuch_login_success")
         await _diag_step(page, diag, "login_success")
         await _save_storage_state(page)
         if diag:
             diag.login_success = True
+        return "/overview" in page.url.lower() or await _is_any_visible(page, KLASSENBUCH_SELECTORS["overview_url_marker"])
     except KlassenbuchLoadError:
         raise
     except Exception as exc:
@@ -438,18 +460,25 @@ def _overview_url() -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, "/overview", "", ""))
 
 
-async def _open_overview(page, diag: KlassenbuchDiagnosticsRun | None = None) -> None:
+async def _open_overview(page, diag: KlassenbuchDiagnosticsRun | None = None, fast: bool = False) -> None:
     await _diag_step(page, diag, "overview_open_started")
     await page.goto(_overview_url(), wait_until="domcontentloaded")
-    try:
-        await page.wait_for_load_state("networkidle", timeout=5000)
-    except Exception:
-        pass
+    if fast:
+        try:
+            await _wait_for_overview_ready(page)
+        except Exception:
+            pass
+    else:
+        try:
+            await page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
     if "/login" in page.url.lower():
         await _raise_load_error(page, "overview_loaded", "Login ins Klassenbuch fehlgeschlagen")
     if not await _is_any_visible(page, KLASSENBUCH_SELECTORS["overview_url_marker"]):
         await _raise_load_error(page, "overview_loaded", "Timeout beim Warten auf Uebersichtstabelle")
-    await _safe_screenshot(page, "klassenbuch_overview_loaded")
+    if diag:
+        await _safe_screenshot(page, "klassenbuch_overview_loaded")
     await _diag_step(page, diag, "overview_loaded")
     if diag:
         diag.overview_loaded = True
@@ -546,8 +575,17 @@ def _extract_edit_action_index(onclick: str) -> str:
     return match.group(1) if match else ""
 
 
-async def _row_edit_action(row) -> tuple[bool, str, str, str]:
-    for selector in KLASSENBUCH_SELECTORS["edit_button"]:
+FAST_EDIT_SELECTORS = [
+    'tr[data-index] a[onclick*="forwardToWizardWithPreselection"]',
+    'a[onclick*="classbookApp.overview.forwardToWizardWithPreselection"]',
+    'a[href*="/classbooks/wizard/new"]',
+    'i.glyphicon.glyphicon-pencil >> xpath=ancestor::a[1]',
+]
+
+
+async def _row_edit_action(row, fast: bool = False) -> tuple[bool, str, str, str]:
+    selectors = FAST_EDIT_SELECTORS if fast else KLASSENBUCH_SELECTORS["edit_button"]
+    for selector in selectors:
         try:
             locator = first_locator(row, selector)
             if await locator.count() and await locator.is_visible():
@@ -578,7 +616,7 @@ async def _row_edit_action(row) -> tuple[bool, str, str, str]:
     return False, "", "", ""
 
 
-async def read_table_by_headers(page, tab_name: str, diag: KlassenbuchDiagnosticsRun | None = None) -> list[dict]:
+async def read_table_by_headers(page, tab_name: str, diag: KlassenbuchDiagnosticsRun | None = None, fast: bool = False) -> list[dict]:
     table = await _visible_table(page)
     if table is None:
         await _diag_step(page, diag, f"tab_{_tab_key(tab_name)}_table_read", {"headers_found": [], "entries_count": 0})
@@ -600,7 +638,7 @@ async def read_table_by_headers(page, tab_name: str, diag: KlassenbuchDiagnostic
         raw = " | ".join(cell for cell in cells if cell)
         if not raw:
             continue
-        editable, edit_href, edit_onclick, edit_action_index = await _row_edit_action(row)
+        editable, edit_href, edit_onclick, edit_action_index = await _row_edit_action(row, fast)
         row_index = ""
         try:
             row_index = await row.get_attribute("data-index") or ""
@@ -651,37 +689,62 @@ async def read_current_tab_table(page, tab_name: str) -> list[dict]:
     return await read_overview_table(page, tab_name)
 
 
-async def _click_overview_tab(page, key: str, tab_name: str, diag: KlassenbuchDiagnosticsRun | None = None) -> None:
+async def _click_overview_tab(page, key: str, tab_name: str, diag: KlassenbuchDiagnosticsRun | None = None, fast: bool = False) -> None:
     await _diag_step(page, diag, f"tab_{key}_started")
     selectors = KLASSENBUCH_SELECTORS["overview_tabs"][key]
     tab = await _locator_or_none(page, selectors)
     if tab is None:
         raise RuntimeError(f"Tab nicht gefunden: {tab_name}")
+    old_table_text = ""
+    if fast:
+        try:
+            table = await _visible_table(page)
+            old_table_text = await table.inner_text() if table is not None else ""
+        except Exception:
+            old_table_text = ""
     await tab.click()
-    try:
-        await page.wait_for_load_state("networkidle", timeout=5000)
-    except Exception:
-        pass
-    await page.wait_for_timeout(700)
-    await _safe_screenshot(page, f"klassenbuch_tab_{key}_loaded")
+    if fast:
+        try:
+            await page.wait_for_function(
+                """oldText => {
+                    const table = document.querySelector("table");
+                    const text = table ? table.innerText : "";
+                    return document.querySelector("tr[data-index]") || (text && text !== oldText);
+                }""",
+                old_table_text,
+                timeout=1200,
+            )
+        except Exception:
+            pass
+        await page.wait_for_timeout(150)
+    else:
+        try:
+            await page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(700)
+        await _safe_screenshot(page, f"klassenbuch_tab_{key}_loaded")
     await _diag_step(page, diag, f"tab_{key}_loaded")
 
 
-async def read_all_overview_tabs(page, diag: KlassenbuchDiagnosticsRun | None = None) -> tuple[list[dict], dict[str, list[dict]], list[dict[str, str]]]:
+async def read_all_overview_tabs(page, diag: KlassenbuchDiagnosticsRun | None = None, tabs: list[str] | None = None, fast: bool = False) -> tuple[list[dict], dict[str, list[dict]], list[dict[str, str]]]:
     entries: list[dict] = []
     groups: dict[str, list[dict]] = {tab_name: [] for _, tab_name in OVERVIEW_TABS}
     tab_errors: list[dict[str, str]] = []
+    selected_tabs = set(tabs or [key for key, _ in OVERVIEW_TABS])
     for key, tab_name in OVERVIEW_TABS:
+        if key not in selected_tabs:
+            continue
         try:
-            await _click_overview_tab(page, key, tab_name, diag)
-            tab_entries = await read_table_by_headers(page, tab_name, diag)
+            await _click_overview_tab(page, key, tab_name, diag, fast)
+            tab_entries = await read_table_by_headers(page, tab_name, diag, fast)
             groups[tab_name] = tab_entries
             entries.extend(tab_entries)
             if diag:
                 diag.tabs[tab_name] = {"found": True, "row_count": len(tab_entries), "entries_count": len(tab_entries), "error": ""}
         except Exception as exc:
-            screenshot_path = await _safe_screenshot(page, f"klassenbuch_tab_{key}_error")
-            html_snapshot_path = await _safe_html_snapshot(page, f"klassenbuch_tab_{key}_error")
+            screenshot_path = await _safe_screenshot(page, f"klassenbuch_tab_{key}_error") if diag else ""
+            html_snapshot_path = await _safe_html_snapshot(page, f"klassenbuch_tab_{key}_error") if diag else ""
             await _diag_step(page, diag, f"tab_{key}_error", {"error": _exception_message(exc, "Tab konnte nicht gelesen werden")})
             if diag:
                 diag.tabs[tab_name] = {"found": False, "row_count": 0, "entries_count": 0, "error": _exception_message(exc, "Tab konnte nicht gelesen werden")}
@@ -749,79 +812,117 @@ async def load_open_klassenbuecher() -> list[dict[str, str]]:
     return result["items"]
 
 
-async def load_klassenbuecher_overview() -> dict:
-    diag = KlassenbuchDiagnosticsRun(_diagnostic_run_id(), "load_open_klassenbuecher")
+def _timing_ms(started_at: float) -> int:
+    return int((perf_counter() - started_at) * 1000)
+
+
+async def load_klassenbuecher_overview(fast: bool = True, tabs: list[str] | None = None, diagnostics_enabled: bool = False) -> dict:
+    tabs = tabs or ["offene"]
+    diag = KlassenbuchDiagnosticsRun(_diagnostic_run_id(), "load_open_klassenbuecher") if diagnostics_enabled else None
     page = None
+    total_started = perf_counter()
+    timings: dict[str, int] = {}
+    diagnostics = {
+        "fast_mode": fast,
+        "tabs_loaded": tabs,
+        "timings_ms": timings,
+        "run_id": diag.run_id if diag else "",
+        "diagnostics_folder": diag.relative_folder if diag else "",
+    }
     try:
+        browser_started = perf_counter()
         async with browser_page(storage_state_path=_storage_state_path()) as page:
-            _attach_diagnostic_listeners(page, diag)
-            await _start_trace(page, diag)
+            timings["browser_start"] = _timing_ms(browser_started)
+            if diag:
+                _attach_diagnostic_listeners(page, diag)
+                await _start_trace(page, diag)
             try:
-                await _login(page, diag)
-                await _open_overview(page, diag)
-                entries, groups, tab_errors = await read_all_overview_tabs(page, diag)
-                diagnostics = await _overview_diagnostics(page)
+                login_started = perf_counter()
+                already_on_overview = await _login(page, diag, fast=fast)
+                timings["login_or_session"] = _timing_ms(login_started)
+                if not already_on_overview:
+                    overview_started = perf_counter()
+                    await _open_overview(page, diag, fast=fast)
+                    timings["overview"] = _timing_ms(overview_started)
+                else:
+                    timings["overview"] = 0
+                read_started = perf_counter()
+                entries, groups, tab_errors = await read_all_overview_tabs(page, diag, tabs=tabs, fast=fast)
+                timings["read_tabs"] = _timing_ms(read_started)
+                if diagnostics_enabled:
+                    diagnostics.update(await _overview_diagnostics(page))
+                else:
+                    diagnostics.update({"current_url": page.url, "page_title": await page.title()})
                 diagnostics["tab_errors"] = tab_errors
-                diagnostics["run_id"] = diag.run_id
-                diagnostics["diagnostics_folder"] = diag.relative_folder
                 if not entries:
-                    screenshot_path = await _safe_screenshot(page, "klassenbuch_overview_no_rows")
-                    html_snapshot_path = await _safe_html_snapshot(page, "klassenbuch_overview_no_rows")
+                    screenshot_path = await _safe_screenshot(page, "klassenbuch_overview_no_rows") if diag else ""
+                    html_snapshot_path = await _safe_html_snapshot(page, "klassenbuch_overview_no_rows") if diag else ""
                     await _diag_step(page, diag, "overview_no_rows", {"message": "Keine Eintraege gefunden."})
-                    diagnostics = await _overview_diagnostics(page, screenshot_path, html_snapshot_path)
+                    if diagnostics_enabled:
+                        diagnostics.update(await _overview_diagnostics(page, screenshot_path, html_snapshot_path))
                     diagnostics["step"] = "overview_no_rows"
                     diagnostics["tab_errors"] = tab_errors
-                    diagnostics["message"] = "Keine Eintraege gefunden. Diagnose gespeichert."
-                await _stop_trace(page, diag)
-                summary = await _write_diagnostic_summary(page, diag, success=True, entries_returned=len(entries), diagnostics=diagnostics)
-                diagnostics.update(
-                    {
-                        "run_id": diag.run_id,
-                        "diagnostics_folder": diag.relative_folder,
-                        "summary_path": summary.get("summary_path", ""),
-                        "trace_path": summary.get("trace_file", ""),
-                        "console_log": summary.get("console_log", ""),
-                        "network_log": summary.get("network_log", ""),
-                    }
-                )
+                    diagnostics["message"] = "Keine Eintraege gefunden." if fast else "Keine Eintraege gefunden. Diagnose gespeichert."
+                if diag:
+                    await _stop_trace(page, diag)
+                    summary = await _write_diagnostic_summary(page, diag, success=True, entries_returned=len(entries), diagnostics=diagnostics)
+                    diagnostics.update(
+                        {
+                            "run_id": diag.run_id,
+                            "diagnostics_folder": diag.relative_folder,
+                            "summary_path": summary.get("summary_path", ""),
+                            "trace_path": summary.get("trace_file", ""),
+                            "console_log": summary.get("console_log", ""),
+                            "network_log": summary.get("network_log", ""),
+                        }
+                    )
+                timings["total"] = _timing_ms(total_started)
                 return {"ok": True, "items": entries, "groups": groups, "diagnostics": diagnostics, "count": len(entries)}
             except KlassenbuchLoadError as exc:
                 await _diag_step(page, diag, "error", {"error": str(exc), "exception_type": type(exc).__name__})
-                await _stop_trace(page, diag)
-                summary = await _write_diagnostic_summary(page, diag, success=False, error_message=str(exc), exception_type=exc.diagnostics.get("exception_type", type(exc).__name__), diagnostics=exc.diagnostics)
-                exc.diagnostics.update(
-                    {
-                        "run_id": diag.run_id,
-                        "diagnostics_folder": diag.relative_folder,
-                        "summary_path": summary.get("summary_path", ""),
-                        "trace_path": summary.get("trace_file", ""),
-                        "console_log": summary.get("console_log", ""),
-                        "network_log": summary.get("network_log", ""),
-                    }
-                )
+                timings["total"] = _timing_ms(total_started)
+                exc.diagnostics.update(diagnostics)
+                if diag:
+                    await _stop_trace(page, diag)
+                    summary = await _write_diagnostic_summary(page, diag, success=False, error_message=str(exc), exception_type=exc.diagnostics.get("exception_type", type(exc).__name__), diagnostics=exc.diagnostics)
+                    exc.diagnostics.update(
+                        {
+                            "run_id": diag.run_id,
+                            "diagnostics_folder": diag.relative_folder,
+                            "summary_path": summary.get("summary_path", ""),
+                            "trace_path": summary.get("trace_file", ""),
+                            "console_log": summary.get("console_log", ""),
+                            "network_log": summary.get("network_log", ""),
+                        }
+                    )
                 raise
             except Exception as exc:
-                diagnostics = await _failure_diagnostics(page, "overview_read", exc)
+                timings["total"] = _timing_ms(total_started)
+                if diag:
+                    diagnostics.update(await _failure_diagnostics(page, "overview_read", exc))
+                else:
+                    diagnostics.update({"step": "overview_read", "exception_type": type(exc).__name__, "current_url": page.url if page else "", "page_title": await page.title() if page else ""})
                 await _diag_step(page, diag, "error", {"error": _exception_message(exc, "Klassenbuecher konnten nicht geladen werden"), "exception_type": type(exc).__name__})
-                await _stop_trace(page, diag)
-                summary = await _write_diagnostic_summary(page, diag, success=False, error_message=_exception_message(exc, "Klassenbuecher konnten nicht geladen werden"), exception_type=type(exc).__name__, diagnostics=diagnostics)
-                diagnostics.update(
-                    {
-                        "run_id": diag.run_id,
-                        "diagnostics_folder": diag.relative_folder,
-                        "summary_path": summary.get("summary_path", ""),
-                        "trace_path": summary.get("trace_file", ""),
-                        "console_log": summary.get("console_log", ""),
-                        "network_log": summary.get("network_log", ""),
-                    }
-                )
+                if diag:
+                    await _stop_trace(page, diag)
+                    summary = await _write_diagnostic_summary(page, diag, success=False, error_message=_exception_message(exc, "Klassenbuecher konnten nicht geladen werden"), exception_type=type(exc).__name__, diagnostics=diagnostics)
+                    diagnostics.update(
+                        {
+                            "run_id": diag.run_id,
+                            "diagnostics_folder": diag.relative_folder,
+                            "summary_path": summary.get("summary_path", ""),
+                            "trace_path": summary.get("trace_file", ""),
+                            "console_log": summary.get("console_log", ""),
+                            "network_log": summary.get("network_log", ""),
+                        }
+                    )
                 raise KlassenbuchLoadError(f"Klassenbuecher konnten nicht geladen werden: {_exception_message(exc, 'unbekannter Fehler')}", diagnostics) from exc
     except KlassenbuchLoadError:
         raise
     except Exception as exc:
+        timings["total"] = _timing_ms(total_started)
         diagnostics = {
-            "run_id": diag.run_id,
-            "diagnostics_folder": diag.relative_folder,
+            **diagnostics,
             "step": "browser_start",
             "current_url": "",
             "page_title": "",
@@ -829,17 +930,18 @@ async def load_klassenbuecher_overview() -> dict:
             "html_snapshot_path": "",
             "exception_type": type(exc).__name__,
         }
-        summary = await _write_diagnostic_summary(None, diag, success=False, error_message=_exception_message(exc, "Klassenbuecher konnten nicht geladen werden"), exception_type=type(exc).__name__, diagnostics=diagnostics)
-        diagnostics.update(
-            {
-                "summary_path": summary.get("summary_path", ""),
-                "trace_path": summary.get("trace_file", ""),
-                "console_log": summary.get("console_log", ""),
-                "network_log": summary.get("network_log", ""),
-                "probable_cause": summary.get("probable_cause", "Playwright/Chromium konnte nicht gestartet werden. Der Fehler trat vor dem Oeffnen der Klassenbuch-Webseite auf."),
-                "next_action": summary.get("next_action", "Browser-Check ausfuehren und Playwright-Installation pruefen."),
-            }
-        )
+        if diag:
+            summary = await _write_diagnostic_summary(None, diag, success=False, error_message=_exception_message(exc, "Klassenbuecher konnten nicht geladen werden"), exception_type=type(exc).__name__, diagnostics=diagnostics)
+            diagnostics.update(
+                {
+                    "summary_path": summary.get("summary_path", ""),
+                    "trace_path": summary.get("trace_file", ""),
+                    "console_log": summary.get("console_log", ""),
+                    "network_log": summary.get("network_log", ""),
+                    "probable_cause": summary.get("probable_cause", "Playwright/Chromium konnte nicht gestartet werden. Der Fehler trat vor dem Oeffnen der Klassenbuch-Webseite auf."),
+                    "next_action": summary.get("next_action", "Browser-Check ausfuehren und Playwright-Installation pruefen."),
+                }
+            )
         raise KlassenbuchLoadError(f"Klassenbuecher konnten nicht geladen werden: {_exception_message(exc, 'unbekannter Fehler')}", diagnostics) from exc
 
 
