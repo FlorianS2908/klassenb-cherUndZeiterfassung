@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { KlassenbuchEntry, UeItem, UploadedFileInfo } from '../types';
+import type { AnalysisResult, KlassenbuchEntry, UeItem, UploadedFileInfo } from '../types';
 
 export type WorkflowStep = 'overview' | 'classbooks' | 'analysis' | 'review' | 'submit_done';
 
@@ -18,8 +18,11 @@ export type WorkflowState = {
     type?: string;
   };
   selectedRange: string;
+  analysisResult: null | AnalysisResult;
   generatedEntries: WorkflowEntry[];
   analysisDone: boolean;
+  reviewConfirmed: boolean;
+  signatureReady: boolean;
   reviewDone: boolean;
 };
 
@@ -30,8 +33,11 @@ export const initialWorkflowState: WorkflowState = {
   selectedClassbook: null,
   uploadedFile: null,
   selectedRange: '',
+  analysisResult: null,
   generatedEntries: [],
   analysisDone: false,
+  reviewConfirmed: false,
+  signatureReady: false,
   reviewDone: false,
 };
 

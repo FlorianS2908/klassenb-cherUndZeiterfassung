@@ -4,7 +4,7 @@ import inspect
 import asyncio
 
 from app.browser import automation_klassenbuch
-from app.browser.automation_klassenbuch import _canvas_has_ink, _draw_saved_signature_with_mouse, _extract_edit_action_index, _fill_signature, _interpolate_points, _normalize_table_key, _row_to_entry, _signature_points, _validate_signature_submit_allowed
+from app.browser.automation_klassenbuch import _canvas_has_ink, _draw_saved_signature_with_mouse, _extract_edit_action_index, _fill_signature, _interpolate_points, _normalize_table_key, _row_to_entry, _signature_points, _validate_fill_signature_payload, _validate_signature_submit_allowed
 from app.browser.base import first_locator
 from app.browser.selectors_timebutler import TIMEBUTLER_SELECTORS
 from app.config import get_settings
@@ -61,6 +61,25 @@ def test_signature_submit_requires_all_safety_gates(monkeypatch):
     assert "Review" in _validate_signature_submit_allowed(payload, review_confirmed=False, signature_confirmed=True)
     assert "Signatur" in _validate_signature_submit_allowed(payload, review_confirmed=True, signature_confirmed=False)
     assert "9 UE" in _validate_signature_submit_allowed({**payload, "ue_items": []}, review_confirmed=True, signature_confirmed=True)
+
+
+def test_fill_classbook_and_open_signature_requires_review_and_nine_ue():
+    payload = {"klassenbuch": {"status": "Offen"}, "ue_items": [{"number": index + 1, "content": "x", "formats": ["Aufgaben-/Uebungsbesprechung"]} for index in range(9)]}
+    assert _validate_fill_signature_payload(payload, review_confirmed=True) is None
+    assert "Review" in _validate_fill_signature_payload(payload, review_confirmed=False)
+    assert "9 UE" in _validate_fill_signature_payload({**payload, "ue_items": []}, review_confirmed=True)
+    assert "Kein Klassenbuch" in _validate_fill_signature_payload({"ue_items": payload["ue_items"]}, review_confirmed=True)
+
+
+def test_fill_classbook_and_open_signature_calls_only_until_signature_page():
+    source = inspect.getsource(automation_klassenbuch.fill_classbook_and_open_signature)
+    assert "await _fill_ue(page, payload, diag)" in source
+    assert "await _save_ue(page)" in source
+    assert "await _open_signature_step(page)" in source
+    assert "await _recognize_signature_page(page)" in source
+    assert "_fill_signature(" not in source
+    assert "_finalize_signature(" not in source
+    assert "submit_klassenbuch" not in source
 
 
 def test_schaffer_signature_points_stay_inside_canvas():

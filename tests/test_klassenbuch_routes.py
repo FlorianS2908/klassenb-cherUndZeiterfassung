@@ -130,3 +130,22 @@ def test_prepare_signature_endpoint_forwards_review_gate(monkeypatch):
     assert response.status_code == 200
     assert body["ok"] is True
     assert body["data"]["canvas_has_ink"] is True
+
+
+def test_fill_and_open_signature_endpoint_forwards_review_gate(monkeypatch):
+    async def fake_fill(payload, review_confirmed):
+        assert payload == {"ue_items": [1] * 9}
+        assert review_confirmed is True
+        return {"ok": True, "message": "Klassenbuch wurde befuellt.", "data": {"signature_page_ready": True}}
+
+    monkeypatch.setattr(routes_klassenbuch, "fill_classbook_and_open_signature", fake_fill)
+    app = FastAPI()
+    app.include_router(routes_klassenbuch.router)
+    client = TestClient(app)
+
+    response = client.post("/api/klassenbuch/fill-and-open-signature", json={"payload": {"ue_items": [1] * 9}, "review_confirmed": True})
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["ok"] is True
+    assert body["data"]["signature_page_ready"] is True

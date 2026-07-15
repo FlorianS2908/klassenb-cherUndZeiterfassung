@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from app.browser.automation_klassenbuch import KlassenbuchLoadError, load_klassenbuecher_overview, prepare_klassenbuch, prepare_signature_klassenbuch, submit_klassenbuch
+from app.browser.automation_klassenbuch import KlassenbuchLoadError, fill_classbook_and_open_signature, load_klassenbuecher_overview, prepare_klassenbuch, prepare_signature_klassenbuch, submit_klassenbuch
 from app.browser.klassenbuch_login_test import test_klassenbuch_login_only
 from app.browser.playwright_health import check_playwright_health
 from app.config import get_settings
@@ -98,6 +98,11 @@ async def prepare(payload: dict):
 @router.post("/prepare-signature")
 async def prepare_signature(request: SubmitRequest):
     return await prepare_signature_klassenbuch(request.payload, request.review_confirmed)
+
+
+@router.post("/fill-and-open-signature")
+async def fill_and_open_signature(request: SubmitRequest):
+    return await fill_classbook_and_open_signature(request.payload, request.review_confirmed)
 
 
 @router.post("/submit")

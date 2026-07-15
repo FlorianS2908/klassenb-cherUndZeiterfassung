@@ -1178,8 +1178,23 @@ async def _save_ue(page) -> None:
 
 async def _open_signature_step(page) -> None:
     _set_signature_step(StepState.running, "Signaturseite gesucht.")
-    await optional_click(page, KLASSENBUCH_SELECTORS["next_button"])
+    next_button = await _locator_or_none(page, KLASSENBUCH_SELECTORS["next_button"])
+    if next_button is None:
+        await _safe_screenshot(page, "signature_page_not_reached")
+        _set_signature_step(StepState.error, "Weiter-Button zur Signatur wurde nicht gefunden.")
+        raise RuntimeError("Weiter-Button zur Signatur wurde nicht gefunden.")
+    await next_button.click()
     await page.wait_for_load_state("networkidle")
+    signature_reached = False
+    for _ in range(10):
+        if await _is_any_visible(page, KLASSENBUCH_SELECTORS["signature_page_markers"]) or await _locator_or_none(page, KLASSENBUCH_SELECTORS["signature_canvas"]) is not None:
+            signature_reached = True
+            break
+        await page.wait_for_timeout(300)
+    if not signature_reached:
+        await _safe_screenshot(page, "signature_page_not_reached")
+        _set_signature_step(StepState.error, "Signaturseite wurde nach Weiter nicht erreicht.")
+        raise RuntimeError("Signaturseite wurde nach Weiter nicht erreicht.")
     await _safe_screenshot(page, "klassenbuch_signature_page_loaded")
     await _safe_screenshot(page, "signatur_page_loaded")
 
@@ -1627,6 +1642,28 @@ def _validate_signature_submit_allowed(payload: dict, review_confirmed: bool, si
     return None
 
 
+def _validate_fill_signature_payload(payload: dict, review_confirmed: bool) -> str | None:
+    if not review_confirmed:
+        return "Klassenbuch-Befuellung gesperrt: Review-Bestaetigung erforderlich."
+    selected = payload.get("klassenbuch") or payload.get("selected_klassenbuch") or payload.get("classbook")
+    if not isinstance(selected, dict) or not selected:
+        return "Klassenbuch-Befuellung gesperrt: Kein Klassenbuch ausgewaehlt."
+    ue_items = payload.get("ue_items") or payload.get("unterrichtseinheiten") or []
+    if len(ue_items) != 9:
+        return "Klassenbuch-Befuellung gesperrt: Es muessen genau 9 UE vorhanden sein."
+    for index, item in enumerate(ue_items, start=1):
+        if not isinstance(item, dict):
+            return f"Klassenbuch-Befuellung gesperrt: UE {index} ist ungueltig."
+        if not str(item.get("content") or item.get("lehrinhalt") or "").strip():
+            return f"Klassenbuch-Befuellung gesperrt: UE {index} hat keinen Inhalt."
+        formats = item.get("formats") or []
+        if not isinstance(formats, list) or not formats:
+            return f"Klassenbuch-Befuellung gesperrt: Lernformate fuer UE {index} fehlen."
+        if len(formats) > 2:
+            return f"Klassenbuch-Befuellung gesperrt: UE {index} hat mehr als zwei Lernformate."
+    return None
+
+
 async def prepare_klassenbuch(payload: dict) -> ApiMessage:
     async with browser_page(storage_state_path=_storage_state_path()) as page:
         diag = KlassenbuchDiagnosticsRun(_diagnostic_run_id(), "prepare_klassenbuch")
@@ -1648,6 +1685,57 @@ async def prepare_klassenbuch(payload: dict) -> ApiMessage:
             await _stop_trace(page, diag)
             summary = await _write_diagnostic_summary(page, diag, success=False, error_message=_exception_message(exc, "Klassenbuch-Dry-Run fehlgeschlagen"), exception_type=type(exc).__name__, diagnostics={"screenshot_path": screenshot})
             return ApiMessage(ok=False, message=f"Klassenbuch-Dry-Run fehlgeschlagen: {_exception_message(exc, 'unbekannter Fehler')}", data={"screenshot": screenshot, "diagnostics": summary})
+
+
+async def fill_classbook_and_open_signature(payload: dict, review_confirmed: bool) -> ApiMessage:
+    blocked_reason = _validate_fill_signature_payload(payload, review_confirmed)
+    if blocked_reason:
+        return ApiMessage(ok=False, message=blocked_reason)
+    async with browser_page(storage_state_path=_storage_state_path()) as page:
+        diag = KlassenbuchDiagnosticsRun(_diagnostic_run_id(), "fill_classbook_and_open_signature")
+        _attach_diagnostic_listeners(page, diag)
+        await _start_trace(page, diag)
+        try:
+            await _diag_step(page, diag, "fill_signature_workflow_started")
+            await _login(page, diag)
+            await _select_entry(page, payload, diag)
+            await _diag_step(page, diag, "selected_classbook_opened")
+            await _fill_ue(page, payload, diag)
+            await _diag_step(page, diag, "teaching_formats_finished")
+            await _save_ue(page)
+            await _diag_step(page, diag, "ue_saved")
+            await _open_signature_step(page)
+            await _diag_step(page, diag, "next_to_signature_clicked")
+            await _recognize_signature_page(page)
+            screenshot = await _safe_screenshot(page, "klassenbuch_signature_ready")
+            await _diag_step(page, diag, "signature_page_ready", {"screenshot_path": screenshot, "signature_page_ready": True})
+            await _stop_trace(page, diag)
+            summary = await _write_diagnostic_summary(page, diag, success=True, diagnostics={"screenshot_path": screenshot})
+            _set_signature_step(StepState.manual_review, "Klassenbuch wurde befuellt und steht auf Signierung.")
+            return ApiMessage(
+                ok=True,
+                message="Klassenbuch wurde befuellt und die Signaturseite wurde geoeffnet.",
+                data={"screenshot": screenshot, "diagnostics": summary, "signature_page_ready": True},
+            )
+        except Exception as exc:
+            screenshot = await _safe_screenshot(page, "signature_page_not_reached")
+            html_snapshot = await _safe_html_snapshot(page, "signature_page_not_reached")
+            await _diag_step(page, diag, "signature_page_not_reached", {"error": _exception_message(exc, "Klassenbuch-Befuellung fehlgeschlagen"), "exception_type": type(exc).__name__})
+            await _stop_trace(page, diag)
+            summary = await _write_diagnostic_summary(
+                page,
+                diag,
+                success=False,
+                error_message=_exception_message(exc, "Klassenbuch-Befuellung fehlgeschlagen"),
+                exception_type=type(exc).__name__,
+                diagnostics={"screenshot_path": screenshot, "html_snapshot_path": html_snapshot, "step": "signature_page_not_reached"},
+            )
+            _set_signature_step(StepState.error, "Klassenbuch-Befuellung oder Signaturseitenwechsel fehlgeschlagen.")
+            return ApiMessage(
+                ok=False,
+                message=f"Klassenbuch-Befuellung fehlgeschlagen: {_exception_message(exc, 'unbekannter Fehler')}",
+                data={"screenshot": screenshot, "diagnostics": summary, "signature_page_ready": False},
+            )
 
 
 async def prepare_signature_klassenbuch(payload: dict, review_confirmed: bool) -> ApiMessage:

@@ -63,13 +63,13 @@ export function FileAnalysisPage({
     });
     setAnalysis(result);
     setItems(nextItems);
-    setWorkflow({ uploadedFile: uploadedFileFromInfo(file), selectedRange: selection, generatedEntries: normalizeEntries(nextItems), analysisDone: true });
+    setWorkflow({ uploadedFile: uploadedFileFromInfo(file), selectedRange: selection, analysisResult: result, generatedEntries: normalizeEntries(nextItems), analysisDone: true });
     await saveAnalysisHistory({ ...result, filename: file.filename, selection });
   }
 
   function updateItems(nextItems: UeItem[]) {
     setItems(nextItems);
-    setWorkflow({ generatedEntries: normalizeEntries(nextItems), analysisDone: nextItems.length === 9 });
+    setWorkflow({ generatedEntries: normalizeEntries(nextItems), analysisDone: nextItems.length === 9, reviewConfirmed: false, signatureReady: false });
   }
 
   function goReview() {

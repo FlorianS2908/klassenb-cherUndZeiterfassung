@@ -86,9 +86,14 @@ def test_guided_klassenbuch_workflow_contracts():
     assert "Zur Review" in analysis
     assert "normalizeEntries" in analysis
     assert "Review noch nicht verfuegbar" in review
-    assert "Ich habe die 9 UE geprueft" in review
+    assert "Ich habe die 9 Unterrichtseinheiten geprueft" in review
+    assert "Klassenbuch befuellen und zur Signatur" in review
+    assert "fillClassbookAndOpenSignature" in review
+    assert "number: item.number ?? index + 1" in review
+    assert "content: item.content" in review
+    assert "formats: item.formats?.length" in review
+    assert "Klassenbuch wurde befuellt und die Signaturseite wurde geoeffnet" in review
     assert "Ich bestaetige, dass diese Signatur final verwendet werden darf" in review
-    assert "Klassenbuch vorbereiten" in review
     assert "Signatur vorbereiten" in review
     assert "Final signieren" in review
     assert "prepareKlassenbuchSignature" in review
@@ -96,7 +101,7 @@ def test_guided_klassenbuch_workflow_contracts():
     assert "!autoSubmit" in review
     assert "signaturePrepared" in review
     assert "Signatur wurde in das Klassenbuch-Canvas eingetragen" in review
-    assert "prepareKlassenbuch" in review
+    assert "fillClassbook" in review
     assert "Signatur verwalten" in signature
     assert "onPointerDown" in signature
     assert "Signatur lokal speichern" in signature
